@@ -31,6 +31,7 @@ async function getResponses(eventId: string): Promise<ParticipantResponse[]> {
 
   if (!data) return []
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return data.map((r: any) => ({
     id: r.id,
     name: r.participants.name,
