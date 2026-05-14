@@ -61,6 +61,38 @@ function formatMonth(dateStr: string | null): string {
   return `${d.getFullYear()}년 ${d.getMonth() + 1}월`
 }
 
+function extractDateAmountMap(
+  headerRow: number, dateCol: number, rows: unknown[][]
+): Record<string, number> {
+  const map: Record<string, number> = {}
+  const headerCells = rows[headerRow] as unknown[]
+  let amountCol = -1
+  for (let c = dateCol; c < headerCells.length; c++) {
+    const cell = String(headerCells[c] ?? '').trim()
+    if (cell === '정산포인트') { amountCol = c; break }
+  }
+  if (amountCol === -1) return map
+
+  for (let r = headerRow + 1; r < rows.length; r++) {
+    const row = rows[r] as unknown[]
+    const rawDate = row[dateCol]
+    if (!rawDate) continue
+    let dateStr = ''
+    if (rawDate instanceof Date) {
+      dateStr = rawDate.toISOString().slice(0, 10)
+    } else {
+      const s = String(rawDate).trim()
+      if (/^\d{4}-\d{2}-\d{2}$/.test(s)) dateStr = s
+      else if (/^\d{4}\/\d{2}\/\d{2}$/.test(s)) dateStr = s.replace(/\//g, '-')
+      else if (/^\d{8}$/.test(s)) dateStr = `${s.slice(0,4)}-${s.slice(4,6)}-${s.slice(6,8)}`
+      else continue
+    }
+    const amount = Number(row[amountCol])
+    if (!isNaN(amount)) map[dateStr] = amount
+  }
+  return map
+}
+
 function parseExcelFile(buffer: ArrayBuffer): Record<number, ExcelSheetData> {
   const wb     = XLSX.read(buffer, { type: 'array', cellDates: true })
   const result: Record<number, ExcelSheetData> = {}
@@ -96,38 +128,6 @@ function parseExcelFile(buffer: ArrayBuffer): Record<number, ExcelSheetData> {
         }
       }
       if (hireHeaderCol !== -1 && leaveHeaderCol !== -1) break
-    }
-
-    function extractDateAmountMap(
-      headerRow: number, dateCol: number, rows: unknown[][]
-    ): Record<string, number> {
-      const map: Record<string, number> = {}
-      const headerCells = rows[headerRow] as unknown[]
-      let amountCol = -1
-      for (let c = dateCol; c < headerCells.length; c++) {
-        const cell = String(headerCells[c] ?? '').trim()
-        if (cell === '정산포인트') { amountCol = c; break }
-      }
-      if (amountCol === -1) return map
-
-      for (let r = headerRow + 1; r < rows.length; r++) {
-        const row = rows[r] as unknown[]
-        const rawDate = row[dateCol]
-        if (!rawDate) continue
-        let dateStr = ''
-        if (rawDate instanceof Date) {
-          dateStr = rawDate.toISOString().slice(0, 10)
-        } else {
-          const s = String(rawDate).trim()
-          if (/^\d{4}-\d{2}-\d{2}$/.test(s)) dateStr = s
-          else if (/^\d{4}\/\d{2}\/\d{2}$/.test(s)) dateStr = s.replace(/\//g, '-')
-          else if (/^\d{8}$/.test(s)) dateStr = `${s.slice(0,4)}-${s.slice(4,6)}-${s.slice(6,8)}`
-          else continue
-        }
-        const amount = Number(row[amountCol])
-        if (!isNaN(amount)) map[dateStr] = amount
-      }
-      return map
     }
 
     if (hireHeaderCol !== -1)
@@ -729,7 +729,9 @@ export default function HRDashboard() {
 
     } else if (/^(hire|leave)_(cafe|wellness)_/.test(key)) {
       const m = key.match(/^(hire|leave)_(cafe|wellness)_(.+)$/)!
-      const [, empType, pointType, empId] = m
+      const empType   = m[1] as string
+      const pointType = m[2] as string
+      const empId     = m[3] as string
       const emp     = employees.find(e => e.id === empId)
       const dateStr = empType === 'hire' ? emp?.join_date ?? null : emp?.leave_date ?? null
       const { error } = await supabase.from('point_requests').upsert({
