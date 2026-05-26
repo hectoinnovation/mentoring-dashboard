@@ -64,6 +64,26 @@ export interface Notification {
   updated_at:        string
 }
 
+// ─── 멘토링 대시보드 추가 타입 ────────────────────────────────────────────────
+
+export interface MentoringReceipt {
+  id: string
+  mentor_token: string
+  month_index: number
+  round: number
+  file_url: string
+  file_name: string
+  uploaded_at: string
+}
+
+export interface MailLog {
+  id: string
+  mentor_token: string
+  mail_type: 'initial_guide' | 'monthly_proposal' | 'receipt_notify'
+  recipient: string
+  sent_at: string
+}
+
 // ─── 레거시 타입 (구 행사 참석 대시보드 컴포넌트 호환) ────────────────────────
 export type ResponseStatus = 'attending' | 'not_attending' | 'pending'
 export type Priority = 'high' | 'normal' | 'low'

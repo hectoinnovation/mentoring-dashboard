@@ -1,566 +1,844 @@
 'use client'
 
-import { useState, useEffect, useRef, type ReactNode } from 'react'
-import * as XLSX from 'xlsx'
-import { supabase, type Employee } from '@/lib/supabase'
+import { useState } from 'react'
+import {
+  MentoringRecord,
+  INITIAL_DATA,
+  TODAY,
 
-// ─── 온보딩 단계 정의 ─────────────────────────────────────────────────────────
+  getTotalActivities,
+  getMonthActivities,
+  getMonthlySupportAmount,
+  getTotalSupportAmount,
+  getCurrentMonthIndex,
+  getMonthStatus,
+  getOperationStatus,
+  hasPhotoUploaded,
+  hasReceiptUploaded,
+  getInitialGuideStatus,
+  getMonthlyProposalGuideStatus,
+  getProposalSubmitStatus,
+  fmtAmount,
+  sendInitialGuideMail,
+  sendMonthlyProposalMail,
+  getMentoringPeriod,
+  getEndMonth,
+  getMonthStartDate,
+  getMonthEndDate,
+  createEmptyActivities,
+  generateInitialGuideMailBody,
+  generateProposalMailBody,
+} from '@/lib/mentoring'
 
-const STAGES = [
-  { id: 's1',  label: '레몬베이스 계정 생성',             timing: '입사 전',        targets: ['인사팀'],             highlight: false },
-  { id: 's2',  label: '리더 면담 및 목표 설정',           timing: '입사 후',         targets: ['입사자', '리더'],     highlight: false },
-  { id: 's3',  label: '레몬베이스 목표/가중치 승인 신청', timing: '입사 후 7일 내',  targets: ['인사담당자', '팀장'], highlight: true  },
-  { id: 's4',  label: '레몬베이스 최종 확인',             timing: '입사 후',         targets: ['인사팀'],             highlight: false },
-  { id: 's5',  label: '5 Missions PT 미션지 전달',        timing: 'D-7',             targets: ['입사자'],             highlight: false },
-  { id: 's6',  label: '미션지 작성 및 재전달',            timing: 'D-1',             targets: ['입사자'],             highlight: false },
-  { id: 's7',  label: '미션 공개',                        timing: 'D-Day',           targets: ['전사'],               highlight: false },
-  { id: 's8',  label: 'PT 참석자 안내 및 일정 조율',      timing: 'D+50',            targets: ['PT 참석자'],          highlight: false },
-  { id: 's9',  label: 'PT 진행',                          timing: 'D+60',            targets: ['입사자', '참석자'],   highlight: false },
-  { id: 's10', label: '현업 부서장 주관 심사',            timing: 'D+63',            targets: ['부서장'],             highlight: false },
-  { id: 's11', label: '대표이사 최종 결정',               timing: 'D+65',            targets: ['대표이사'],           highlight: false },
-  { id: 's12', label: '시용평가 일정 및 완료 관리',       timing: '별도 일정',       targets: ['인사팀', '입사자'],   highlight: false },
-]
+// ─────────────────────────────────────────────────────────────────────────────
+// Common UI Components
+// ─────────────────────────────────────────────────────────────────────────────
 
-// ─── 고정 수신자 ──────────────────────────────────────────────────────────────
-
-const FR = {
-  hire:    ['t_10010300@hecto.co.kr']                          as const,
-  leave:   ['t_10010300@hecto.co.kr', 't_849fm@hecto.co.kr']  as const,
-  onboard: ['inno_hm@hecto.co.kr']                            as const,
-  cafe:    ['story2110@hecto.co.kr']                           as const,
-  wellness:['yhj@hecto.co.kr']                                 as const,
-}
-
-// ─── 타입 ─────────────────────────────────────────────────────────────────────
-
-interface EmployeeForm {
-  name:       string
-  join_date:  string
-  leave_date: string
-  division:   string
-  team:       string
-  leader:     string
-  status:     'active' | 'resigned'
-}
-
-const EMPTY_FORM: EmployeeForm = {
-  name: '', join_date: '', leave_date: '',
-  division: '', team: '', leader: '', status: 'active',
-}
-
-interface ExcelSheetData {
-  hire:  Record<string, number>
-  leave: Record<string, number>
-}
-
-// ─── 유틸 ─────────────────────────────────────────────────────────────────────
-
-function formatMonth(dateStr: string | null): string {
-  if (!dateStr) return '-'
-  const d = new Date(dateStr)
-  return `${d.getFullYear()}년 ${d.getMonth() + 1}월`
-}
-
-function extractDateAmountMap(
-  headerRow: number, dateCol: number, rows: unknown[][]
-): Record<string, number> {
-  const map: Record<string, number> = {}
-  const headerCells = rows[headerRow] as unknown[]
-  let amountCol = -1
-  for (let c = dateCol; c < headerCells.length; c++) {
-    const cell = String(headerCells[c] ?? '').trim()
-    if (cell === '정산포인트') { amountCol = c; break }
+function OperationBadge({ status }: { status: string }) {
+  const cls: Record<string, string> = {
+    '운영 중':       'bg-orange-100 text-orange-700 border-orange-200',
+    '진행중':        'bg-orange-100 text-orange-700 border-orange-200',
+    '월별 마감':     'bg-blue-100 text-blue-700 border-blue-200',
+    '3회 이상 달성': 'bg-green-100 text-green-700 border-green-200',
+    '활동 미달':     'bg-red-100 text-red-700 border-red-200',
+    '전체 종료':     'bg-gray-100 text-gray-600 border-gray-200',
+    '대기':          'bg-gray-100 text-gray-400 border-gray-200',
   }
-  if (amountCol === -1) return map
-
-  for (let r = headerRow + 1; r < rows.length; r++) {
-    const row = rows[r] as unknown[]
-    const rawDate = row[dateCol]
-    if (!rawDate) continue
-    let dateStr = ''
-    if (rawDate instanceof Date) {
-      dateStr = rawDate.toISOString().slice(0, 10)
-    } else {
-      const s = String(rawDate).trim()
-      if (/^\d{4}-\d{2}-\d{2}$/.test(s)) dateStr = s
-      else if (/^\d{4}\/\d{2}\/\d{2}$/.test(s)) dateStr = s.replace(/\//g, '-')
-      else if (/^\d{8}$/.test(s)) dateStr = `${s.slice(0,4)}-${s.slice(4,6)}-${s.slice(6,8)}`
-      else continue
-    }
-    const amount = Number(row[amountCol])
-    if (!isNaN(amount)) map[dateStr] = amount
-  }
-  return map
-}
-
-function parseExcelFile(buffer: ArrayBuffer): Record<number, ExcelSheetData> {
-  const wb     = XLSX.read(buffer, { type: 'array', cellDates: true })
-  const result: Record<number, ExcelSheetData> = {}
-
-  for (let m = 1; m <= 12; m++) {
-    const sheetName = `${m}월`
-    const ws = wb.Sheets[sheetName]
-    if (!ws) continue
-
-    const rows: unknown[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' })
-    const hireMap:  Record<string, number> = {}
-    const leaveMap: Record<string, number> = {}
-
-    let hireHeaderCol  = -1
-    let leaveHeaderCol = -1
-    let hireHeaderRow  = -1
-    let leaveHeaderRow = -1
-
-    for (let r = 0; r < rows.length; r++) {
-      const row = rows[r] as unknown[]
-      for (let c = 0; c < row.length; c++) {
-        const cell = String(row[c] ?? '').trim()
-        if (cell === '입사일자' && hireHeaderCol === -1) {
-          hireHeaderCol = c
-          hireHeaderRow = r
-        } else if (cell === '입사일자' && hireHeaderCol !== -1 && c > hireHeaderCol) {
-          leaveHeaderCol = c
-          leaveHeaderRow = r
-        }
-        if (cell === '퇴사일자' && leaveHeaderCol === -1) {
-          leaveHeaderCol = c
-          leaveHeaderRow = r
-        }
-      }
-      if (hireHeaderCol !== -1 && leaveHeaderCol !== -1) break
-    }
-
-    if (hireHeaderCol !== -1)
-      Object.assign(hireMap, extractDateAmountMap(hireHeaderRow, hireHeaderCol, rows))
-    if (leaveHeaderCol !== -1)
-      Object.assign(leaveMap, extractDateAmountMap(leaveHeaderRow, leaveHeaderCol, rows))
-
-    result[m] = { hire: hireMap, leave: leaveMap }
-  }
-
-  return result
-}
-
-function lookupExcelAmount(
-  excelData: Record<number, ExcelSheetData>,
-  dateStr: string | null,
-  type: 'hire' | 'leave'
-): number | null {
-  if (!dateStr) return null
-  const m = new Date(dateStr).getMonth() + 1
-  const sheet = excelData[m]
-  if (!sheet) return null
-  const amount = sheet[type][dateStr]
-  return amount !== undefined ? amount : null
-}
-
-// ─── 공통 UI 컴포넌트 ─────────────────────────────────────────────────────────
-
-function GreenBadge({ label }: { label: string }) {
   return (
-    <span className="inline-flex items-center gap-1 text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-full whitespace-nowrap">
-      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 flex-shrink-0" />{label}
+    <span className={`inline-flex text-xs font-semibold px-2 py-0.5 rounded-full border whitespace-nowrap ${cls[status] ?? 'bg-gray-100 text-gray-500 border-gray-200'}`}>
+      {status}
     </span>
   )
 }
 
-function TimingPill({ label }: { label: string }) {
-  const isD = label.startsWith('D')
+function MonthBadge({ status }: { status: string }) {
+  const cls: Record<string, string> = {
+    '대기':       'bg-gray-100 text-gray-500 border-gray-200',
+    '진행중':     'bg-orange-100 text-orange-700 border-orange-200',
+    '마감':       'bg-green-100 text-green-700 border-green-200',
+    '미달 마감':  'bg-red-100 text-red-700 border-red-200',
+    '미진행 마감':'bg-red-100 text-red-600 border-red-200',
+  }
   return (
-    <span className={`text-xs font-mono font-semibold px-2 py-0.5 rounded-md whitespace-nowrap flex-shrink-0 ${isD ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-500'}`}>
+    <span className={`inline-flex text-xs font-medium px-2 py-0.5 rounded-full border whitespace-nowrap ${cls[status] ?? 'bg-gray-100 text-gray-500 border-gray-200'}`}>
+      {status}
+    </span>
+  )
+}
+
+function MailBadge({ status }: { status: 'pending' | 'sent' }) {
+  return status === 'sent'
+    ? <span className="inline-flex text-xs font-medium px-2 py-0.5 rounded-full bg-green-100 text-green-700 border border-green-200 whitespace-nowrap">발송완료</span>
+    : <span className="inline-flex text-xs font-medium px-2 py-0.5 rounded-full bg-gray-100 text-gray-500 border border-gray-200 whitespace-nowrap">미발송</span>
+}
+
+function PhotoBadge({ uploaded }: { uploaded: boolean }) {
+  return uploaded
+    ? <span className="inline-flex text-xs font-medium px-2 py-0.5 rounded-full bg-green-100 text-green-700 border border-green-200 whitespace-nowrap">등록됨</span>
+    : <span className="inline-flex text-xs font-medium px-2 py-0.5 rounded-full bg-gray-100 text-gray-500 border border-gray-200 whitespace-nowrap">미등록</span>
+}
+
+function ReceiptBadge({ uploaded }: { uploaded: boolean }) {
+  return uploaded
+    ? <span className="inline-flex text-xs font-medium px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 border border-blue-200 whitespace-nowrap">등록됨</span>
+    : <span className="inline-flex text-xs font-medium px-2 py-0.5 rounded-full bg-gray-100 text-gray-400 border border-gray-200 whitespace-nowrap">미등록</span>
+}
+
+function SendMailBtn({ status, label, onSend, disabled }: {
+  status: 'pending' | 'sent'; label: string; onSend: () => void; disabled?: boolean
+}) {
+  if (status === 'sent') {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs text-green-600 font-semibold whitespace-nowrap">
+        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M3 8l3 3 7-7" /></svg>
+        발송완료
+      </span>
+    )
+  }
+  return (
+    <button onClick={onSend} disabled={disabled}
+      className={`inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg transition-all whitespace-nowrap ${disabled ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-orange-500 hover:bg-orange-600 active:scale-95 text-white'}`}>
+      <svg className="w-3 h-3" fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M2 8l11-5-5 11-1.5-4.5L2 8z" /></svg>
       {label}
-    </span>
-  )
-}
-
-function TargetPill({ label }: { label: string }) {
-  return (
-    <span className="text-xs bg-orange-50 text-orange-700 border border-orange-200 px-1.5 py-0.5 rounded whitespace-nowrap">
-      {label}
-    </span>
-  )
-}
-
-function SendBtn({ sent, label = '메일', onClick }: { sent: boolean; label?: string; onClick: () => void }) {
-  if (sent) return (
-    <span className="inline-flex items-center gap-1 text-xs text-emerald-600 font-semibold whitespace-nowrap">
-      <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth={2}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l3 3 7-7" />
-      </svg>발송 완료
-    </span>
-  )
-  return (
-    <button onClick={onClick} className="inline-flex items-center gap-1 text-xs font-semibold bg-orange-500 hover:bg-orange-600 active:scale-95 text-white px-3 py-1.5 rounded-lg transition-all whitespace-nowrap flex-shrink-0">
-      <svg className="w-3 h-3" fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth={2}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M2 8l11-5-5 11-1.5-4.5L2 8z" />
-      </svg>{label}
     </button>
   )
 }
 
-function SectionHead({ icon, title, desc, badge, action }: {
-  icon: string; title: string; desc?: string; badge?: string; action?: ReactNode
-}) {
+function CopyLinkBtn({ token }: { token: string }) {
+  const [copied, setCopied] = useState(false)
+  const handleCopy = () => {
+    const base = typeof window !== 'undefined' ? window.location.origin : ''
+    navigator.clipboard?.writeText(`${base}/mentor/${token}`).catch(() => {})
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
   return (
-    <div className="flex items-start justify-between mb-5 gap-3">
-      <div className="flex items-center gap-2.5">
-        <span className="text-xl leading-none">{icon}</span>
-        <div>
-          <h2 className="text-base font-bold text-gray-800">{title}</h2>
-          {desc && <p className="text-xs text-gray-500 mt-0.5">{desc}</p>}
+    <button onClick={handleCopy}
+      className={`text-xs px-2 py-1 rounded-lg border font-medium transition-all whitespace-nowrap ${copied ? 'bg-green-50 border-green-200 text-green-700' : 'bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100'}`}>
+      {copied ? '✓ 복사됨' : '링크 복사'}
+    </button>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Mail Preview  (바디 생성을 lib/mentoring.ts 함수로 통합)
+// ─────────────────────────────────────────────────────────────────────────────
+
+function MailPreview({ record, type }: { record: MentoringRecord; type: 'initial' | 'proposal' }) {
+  const link = typeof window !== 'undefined'
+    ? `${window.location.origin}/mentor/${record.token}`
+    : `/mentor/${record.token}`
+
+  const subject = type === 'initial'
+    ? '신규입사자 멘토링 안내'
+    : '멘토링 활동 지원금 품의 안내'
+
+  const body = type === 'initial'
+    ? generateInitialGuideMailBody(record, link)
+    : generateProposalMailBody(record)
+
+  return (
+    <div className="mt-3 bg-gray-50 rounded-xl border border-gray-200 p-4">
+      <p className="text-xs font-semibold text-gray-500 mb-2">메일 미리보기</p>
+      <div className="bg-white border border-gray-200 rounded-lg p-4">
+        <div className="mb-3 pb-3 border-b border-gray-100">
+          <p className="text-xs text-gray-400">제목</p>
+          <p className="text-sm font-semibold text-gray-800 mt-0.5">{subject}</p>
         </div>
-      </div>
-      <div className="flex items-center gap-2 flex-shrink-0">
-        {action}
-        {badge && (
-          <span className="text-xs font-semibold bg-gray-100 text-gray-600 px-2.5 py-1 rounded-full whitespace-nowrap">{badge}</span>
-        )}
+        <pre className="text-xs text-gray-700 leading-relaxed whitespace-pre-wrap font-sans">{body}</pre>
       </div>
     </div>
   )
 }
 
-function InfoRow({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="flex items-center justify-between gap-3 py-1.5 border-b border-gray-50 last:border-0">
-      <span className="text-xs text-gray-400 flex-shrink-0">{label}</span>
-      <div className="flex-shrink-0">{children}</div>
-    </div>
-  )
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// Activity Detail Modal
+// ─────────────────────────────────────────────────────────────────────────────
 
-// ─── 메일 패널 (포인트 카드 전용) ─────────────────────────────────────────────
-
-function MailPanel({
-  fixedRecipients, defaultSubject, mailSent, onSend,
-}: {
-  fixedRecipients: readonly string[]
-  defaultSubject: string
-  mailSent: boolean
-  onSend: () => void
-}) {
-  const [subject, setSubject] = useState(defaultSubject)
-  const [extra, setExtra]     = useState('')
+function ActivityDetailModal({ record, onClose }: { record: MentoringRecord; onClose: () => void }) {
+  const period = getMentoringPeriod(record.joinMonth)
+  const total  = getTotalActivities(record)
 
   return (
-    <div className="bg-gray-50 rounded-xl border border-gray-200 p-4 space-y-3">
-      <div>
-        <p className="text-xs font-semibold text-gray-400 mb-2">고정 수신자</p>
-        <div className="flex flex-wrap gap-1.5">
-          {fixedRecipients.map(r => (
-            <span key={r} className="inline-flex items-center gap-1.5 text-xs font-mono bg-white border border-blue-200 text-blue-700 px-2.5 py-1 rounded-lg shadow-sm">
-              🔒 {r}
-            </span>
-          ))}
-        </div>
-      </div>
-      <div>
-        <p className="text-xs font-semibold text-gray-400 mb-1.5">추가 수신자 <span className="font-normal text-gray-300">(선택)</span></p>
-        <input type="text" value={extra} onChange={e => setExtra(e.target.value)} disabled={mailSent}
-          placeholder="이메일 주소 입력, 쉼표로 구분"
-          className="w-full text-xs border border-gray-200 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-orange-400 placeholder:text-gray-300 disabled:bg-gray-100" />
-      </div>
-      <div>
-        <p className="text-xs font-semibold text-gray-400 mb-1.5">메일 제목</p>
-        <input type="text" value={subject} onChange={e => setSubject(e.target.value)} disabled={mailSent}
-          className="w-full text-xs border border-gray-200 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-orange-400 disabled:bg-gray-100" />
-      </div>
-      <div className="flex items-center justify-end pt-1 border-t border-gray-200">
-        <SendBtn sent={mailSent} label="발송" onClick={onSend} />
-      </div>
-    </div>
-  )
-}
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[88vh] overflow-hidden flex flex-col"
+        onClick={e => e.stopPropagation()}>
 
-// ─── 알림 행 (컴팩트 가로 레이아웃) ──────────────────────────────────────────
-
-function NotifRow({
-  name, date, division, team, mailSent, onSend,
-  onEdit, onDelete,
-}: {
-  name: string; date: string; division: string; team: string
-  mailSent: boolean; onSend: () => void
-  onEdit: () => void; onDelete: () => void
-}) {
-  return (
-    <div className="flex items-center gap-3 px-4 py-3 bg-white rounded-xl border border-gray-200 shadow-sm">
-      <div className="w-8 h-8 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center font-bold text-sm flex-shrink-0">
-        {name[0]}
-      </div>
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-bold text-gray-900 leading-none">{name}</p>
-        <p className="text-xs text-gray-400 mt-0.5 truncate">{date} · {division || '-'} · {team || '-'}</p>
-      </div>
-      <div className="flex items-center gap-1.5 flex-shrink-0">
-        <SendBtn sent={mailSent} onClick={onSend} />
-        <button onClick={onEdit} title="수정"
-          className="w-6 h-6 flex items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 hover:text-gray-700">
-          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M11 2l3 3-8 8H3v-3l8-8z" /></svg>
-        </button>
-        <button onClick={onDelete} title="삭제"
-          className="w-6 h-6 flex items-center justify-center rounded-md text-gray-400 hover:bg-red-50 hover:text-red-500">
-          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3 4h10M6 4V2h4v2M5 4v9h6V4" /></svg>
-        </button>
-      </div>
-    </div>
-  )
-}
-
-// ─── 온보딩 단계 행 ───────────────────────────────────────────────────────────
-
-function OnboardingRow({
-  stage, idx, isDone, isSent, hireName, onToggleDone, onSendMail,
-}: {
-  stage: typeof STAGES[0]; idx: number
-  isDone: boolean; isSent: boolean; hireName: string
-  onToggleDone: () => void; onSendMail: () => void
-}) {
-  const [open, setOpen] = useState(false)
-  return (
-    <div className={`border-b border-gray-50 last:border-0 ${isDone ? 'bg-gray-50/70' : ''} ${stage.highlight && !isDone ? 'bg-amber-50/50' : ''}`}>
-      <div className="flex items-center gap-3 px-5 py-3">
-        <span className="text-xs text-gray-300 font-mono w-5 flex-shrink-0 text-right select-none">{idx + 1}</span>
-        <button onClick={onToggleDone} title="완료 처리"
-          className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 transition-colors ${isDone ? 'bg-orange-500 border-orange-500' : 'border-gray-300 hover:border-orange-400 bg-white'}`}>
-          {isDone && <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 12 12"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>}
-        </button>
-        <TimingPill label={stage.timing} />
-        <span className={`flex-1 text-sm min-w-0 leading-snug ${isDone ? 'line-through text-gray-400' : stage.highlight ? 'text-amber-800 font-semibold' : 'text-gray-700'}`}>
-          {stage.label}
-          {stage.highlight && !isDone && <span className="ml-1.5 text-xs font-normal text-amber-600 bg-amber-100 px-1.5 py-0.5 rounded">7일 기한</span>}
-        </span>
-        <div className="hidden xl:flex items-center gap-1 flex-shrink-0">
-          {stage.targets.map(t => <TargetPill key={t} label={t} />)}
-        </div>
-        <button onClick={() => setOpen(p => !p)}
-          className={`text-xs px-2 py-1 rounded-lg border transition-colors flex-shrink-0 flex items-center gap-1 ${open ? 'bg-orange-100 border-orange-200 text-orange-700' : isSent ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-white border-gray-200 text-gray-500 hover:border-gray-300'}`}>
-          <svg className="w-3 h-3" fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M2 4h12v9H2zM2 4l6 5 6-5" /></svg>
-          {isSent ? '발송완료' : '메일'}
-          <svg className={`w-2.5 h-2.5 transition-transform ${open ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 10 10" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M2 4l3 3 3-3" /></svg>
-        </button>
-      </div>
-      {open && (
-        <div className="px-5 pb-4">
-          <MailPanel fixedRecipients={FR.onboard} defaultSubject={`[온보딩] ${hireName} - ${stage.label}`} mailSent={isSent} onSend={onSendMail} />
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ─── 온보딩 카드 (접기/펼치기) ────────────────────────────────────────────────
-
-function OnboardingCard({
-  hire, stageDone, mailSent,
-  onToggleDone, onSendMail,
-}: {
-  hire: Employee
-  stageDone: Record<string, boolean>
-  mailSent:  Record<string, boolean>
-  onToggleDone: (empId: string, stageId: string) => void
-  onSendMail:   (key: string) => void
-}) {
-  const [expanded, setExpanded] = useState(false)
-  const done = STAGES.filter(s => !!stageDone[`${hire.id}_${s.id}`]).length
-  const pct  = Math.round((done / STAGES.length) * 100)
-
-  return (
-    <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-      <div className="bg-gradient-to-r from-orange-50 to-amber-50 border-b border-orange-100 px-5 py-4">
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="w-9 h-9 rounded-full bg-orange-500 text-white flex items-center justify-center font-bold text-sm flex-shrink-0">
-              {hire.name[0]}
-            </div>
-            <div className="min-w-0">
-              <p className="font-bold text-gray-900">{hire.name}</p>
-              <p className="text-xs text-gray-500 truncate">
-                {hire.join_date ?? '-'} 입사 · {hire.division ?? '-'} {hire.team ?? '-'}
-              </p>
+        <div className="px-6 py-4 border-b border-gray-100 flex items-start justify-between gap-4">
+          <div>
+            <h2 className="font-bold text-gray-900 text-base">
+              {record.mentorName} <span className="text-gray-400 font-normal">멘토</span>
+              <span className="mx-2 text-gray-300">→</span>
+              {record.menteeName} <span className="text-gray-400 font-normal">멘티</span>
+            </h2>
+            <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-1 text-xs text-gray-500">
+              <span>입사월: {record.joinMonth}</span>
+              <span>운영기간: {period.start} ~ {period.end}</span>
+              <span>총 <strong className="text-gray-800">{total}회</strong> 활동</span>
+              <span>총 지급 예정: <strong className="text-orange-600">{fmtAmount(getTotalSupportAmount(record))}</strong></span>
             </div>
           </div>
-          <div className="flex items-center gap-3 flex-shrink-0">
-            <div className="text-right">
-              <p className="text-lg font-black text-orange-600 leading-none">{pct}%</p>
-              <p className="text-xs text-gray-400 mt-0.5">{done}/{STAGES.length}</p>
-            </div>
-            <button
-              onClick={() => setExpanded(p => !p)}
-              className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border transition-colors ${expanded ? 'bg-orange-100 border-orange-200 text-orange-700' : 'bg-white border-gray-200 text-gray-500 hover:border-gray-300'}`}>
-              {expanded ? '접기' : '펼치기'}
-              <svg className={`w-3 h-3 transition-transform ${expanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 10 10" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M2 4l3 3 3-3" />
-              </svg>
-            </button>
-          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors text-2xl leading-none flex-shrink-0">×</button>
         </div>
-        <div className="mt-3 w-full bg-orange-100 rounded-full h-1.5">
-          <div className="bg-orange-500 h-1.5 rounded-full transition-all duration-300" style={{ width: `${pct}%` }} />
-        </div>
-      </div>
-      {expanded && (
-        <div>
-          {STAGES.map((stage, idx) => {
-            const key    = `${hire.id}_${stage.id}`
-            const isDone = !!stageDone[key]
-            const isSent = !!mailSent[`mail_${key}`]
+
+        <div className="overflow-y-auto p-5 space-y-5">
+          {([1, 2, 3] as const).map(mi => {
+            const acts = record.activities.filter(a => a.monthIndex === mi)
             return (
-              <OnboardingRow key={stage.id} stage={stage} idx={idx}
-                isDone={isDone} isSent={isSent} hireName={hire.name}
-                onToggleDone={() => onToggleDone(hire.id, stage.id)}
-                onSendMail={() => onSendMail(`mail_${key}`)} />
+              <div key={mi}>
+                <div className="flex items-center gap-2 mb-2.5">
+                  <span className="text-xs font-bold text-gray-600 bg-gray-100 px-2 py-0.5 rounded-full">{mi}개월차</span>
+                  <span className="text-xs text-gray-400">
+                    {getMonthStartDate(record.joinMonth, mi)} ~ {getMonthEndDate(record.joinMonth, mi)}
+                  </span>
+                </div>
+                <div className="space-y-2">
+                  {acts.map(act => (
+                    <div key={act.round}
+                      className={`rounded-xl border p-4 ${act.saved ? 'border-green-200 bg-green-50/30' : 'border-gray-200 bg-gray-50/50'}`}>
+                      <div className="flex items-center gap-2 mb-3">
+                        <span className="text-xs font-bold text-gray-700">{mi}개월차 / {act.round}회차</span>
+                        {act.saved
+                          ? <span className="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full border border-green-200">저장완료</span>
+                          : <span className="text-xs bg-gray-100 text-gray-400 px-1.5 py-0.5 rounded-full border border-gray-200">미저장</span>
+                        }
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div className="space-y-2 text-xs">
+                          <div className="flex gap-2">
+                            <span className="text-gray-400 w-14 flex-shrink-0">활동일</span>
+                            <span className="text-gray-700">{act.date || '-'}</span>
+                          </div>
+                          <div className="flex gap-2">
+                            <span className="text-gray-400 w-14 flex-shrink-0">활동 내용</span>
+                            <span className={`leading-relaxed ${act.content ? 'text-gray-700' : 'text-gray-400 italic'}`}>
+                              {act.content || '활동 내용 미입력'}
+                            </span>
+                          </div>
+                          <div className="flex gap-2">
+                            <span className="text-gray-400 w-14 flex-shrink-0">사진</span>
+                            <span className={act.photoName ? 'text-gray-600' : 'text-gray-400 italic'}>
+                              {act.photoName || '없음'}
+                            </span>
+                          </div>
+                          <div className="flex gap-2">
+                            <span className="text-gray-400 w-14 flex-shrink-0">영수증</span>
+                            {act.receiptName ? (
+                              act.receiptUrl
+                                ? <a href={act.receiptUrl} target="_blank" rel="noreferrer" className="text-blue-600 underline truncate max-w-[120px]">{act.receiptName}</a>
+                                : <span className="text-blue-600 truncate max-w-[120px]">{act.receiptName}</span>
+                            ) : (
+                              <span className="text-gray-400 italic">없음</span>
+                            )}
+                          </div>
+                        </div>
+                        <div>
+                          {act.photoUrl
+                            ? <img src={act.photoUrl} alt={act.photoName}
+                                className="w-full max-h-36 object-cover rounded-lg border border-gray-200" />
+                            : <div className={`text-xs rounded-lg p-3 text-center flex items-center justify-center h-20 ${act.saved ? 'bg-amber-50 border border-amber-200 text-amber-600' : 'bg-gray-100 border border-gray-200 text-gray-400 italic'}`}>
+                                {act.saved ? '📷 사진 미등록' : '사진 미등록'}
+                              </div>
+                          }
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
             )
           })}
         </div>
-      )}
+      </div>
     </div>
   )
 }
 
-// ─── 포인트 카드 ──────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Admin Summary Table  (기본 요약 표: 멘토|멘티|월|활동횟수|증빙|지급금액|상태)
+// ─────────────────────────────────────────────────────────────────────────────
 
-function PointCard({
-  name, dateLabel, date, baseMonth,
-  mailSent, onSendMail, fixedRecipients, defaultSubject, autoAmount,
-}: {
-  name: string; dateLabel: string; date: string; baseMonth: string
-  mailSent: boolean; onSendMail: () => void
-  fixedRecipients: readonly string[]; defaultSubject: string
-  autoAmount: number | null
+function AdminSummaryTable({ records }: { records: MentoringRecord[] }) {
+  return (
+    <div className="overflow-x-auto -mx-1">
+      <table className="w-full text-sm border-collapse" style={{ minWidth: 640 }}>
+        <thead>
+          <tr className="bg-gray-50 border-b border-gray-200">
+            {['멘토', '멘티', '월', '활동횟수', '영수증 증빙', '지급금액', '상태'].map(h => (
+              <th key={h} className="text-left text-xs font-semibold text-gray-500 px-3 py-2.5 whitespace-nowrap">{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {records.flatMap((r, ri) =>
+            ([1, 2, 3] as const).map((mi, miIdx) => {
+              const cnt = getMonthActivities(r, mi)
+              const amt = getMonthlySupportAmount(r, mi)
+              const st  = getMonthStatus(r, mi)
+              const receipt = hasReceiptUploaded(r, mi)
+              const isFirst = miIdx === 0
+              const rowBg = ri % 2 === 0 ? '' : 'bg-gray-50/40'
+              return (
+                <tr key={`${r.id}-${mi}`} className={`border-b border-gray-100 hover:bg-orange-50/20 transition-colors ${rowBg}`}>
+                  {isFirst && (
+                    <>
+                      <td rowSpan={3} className="px-3 py-2 font-semibold text-gray-800 whitespace-nowrap align-top border-r border-gray-100 pt-3">
+                        {r.mentorName}
+                      </td>
+                      <td rowSpan={3} className="px-3 py-2 text-gray-600 whitespace-nowrap align-top border-r border-gray-100 pt-3">
+                        {r.menteeName}
+                      </td>
+                    </>
+                  )}
+                  <td className="px-3 py-2 text-xs text-gray-600 whitespace-nowrap">
+                    <span className="font-semibold text-gray-700">{mi}개월차</span>
+                    <span className="text-gray-400 ml-1 text-xs">
+                      {getMonthStartDate(r.joinMonth, mi).slice(5)} ~ {getMonthEndDate(r.joinMonth, mi).slice(5)}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2 text-center">
+                    <span className={`text-sm font-bold ${cnt >= 3 ? 'text-green-600' : cnt >= 2 ? 'text-orange-500' : 'text-gray-400'}`}>
+                      {cnt}<span className="text-xs font-normal text-gray-400">/3회</span>
+                    </span>
+                  </td>
+                  <td className="px-3 py-2"><ReceiptBadge uploaded={receipt} /></td>
+                  <td className="px-3 py-2 text-right whitespace-nowrap">
+                    <span className={`text-xs font-bold ${amt > 0 ? 'text-orange-600' : 'text-gray-400'}`}>
+                      {fmtAmount(amt)}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2"><MonthBadge status={st} /></td>
+                </tr>
+              )
+            })
+          )}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Admin Tab: Overview
+// ─────────────────────────────────────────────────────────────────────────────
+
+function AdminOverviewTab({ records, onUpdate }: {
+  records: MentoringRecord[]
+  onUpdate: (id: string, fn: (r: MentoringRecord) => MentoringRecord) => void
 }) {
-  const [amount, setAmount] = useState(autoAmount !== null ? String(autoAmount) : '')
+  const [detailId, setDetailId] = useState<string | null>(null)
+  const [showSummary, setShowSummary] = useState(true)
+  const detailRecord = detailId ? records.find(r => r.id === detailId) ?? null : null
 
-  useEffect(() => {
-    if (autoAmount !== null) setAmount(String(autoAmount))
-  }, [autoAmount])
+  const headers = [
+    '멘토명', '멘티명', '멘토 이메일', '입사월', '운영 기간', '지급 종료월', '운영 상태', '현재 개월차',
+    '총 활동', '1개월 예정금액', '2개월 예정금액', '3개월 예정금액', '총 지급 예정',
+    '사진 등록', '영수증', '활동 상세', '최초 안내', '월말 품의 안내', '내부망 품의', '멘토 링크',
+  ]
 
   return (
-    <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 flex flex-col gap-4">
-      <div className="flex items-start justify-between">
-        <div>
-          <p className="font-bold text-gray-900">{name}</p>
-          <p className="text-xs text-gray-400 mt-0.5">{dateLabel}: {date}</p>
+    <>
+      {/* 기본 요약 표 */}
+      <div className="mb-6">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-bold text-gray-700 flex items-center gap-2">
+            <span className="w-1 h-4 bg-orange-400 rounded-full inline-block" />
+            기본 요약 표
+          </h3>
+          <button onClick={() => setShowSummary(v => !v)}
+            className="text-xs text-gray-400 hover:text-gray-600 transition-colors">
+            {showSummary ? '접기 ▲' : '펼치기 ▼'}
+          </button>
         </div>
-        {mailSent && <GreenBadge label="발송 완료" />}
+        {showSummary && (
+          <div className="bg-gray-50 rounded-xl border border-gray-200 overflow-hidden">
+            <AdminSummaryTable records={records} />
+          </div>
+        )}
       </div>
+
+      {/* 상세 전체 현황 */}
       <div>
-        <InfoRow label="기준월"><span className="text-xs font-semibold text-gray-700">{baseMonth}</span></InfoRow>
-        <InfoRow label="일할 계산 금액">
-          <input type="text" value={amount} onChange={e => setAmount(e.target.value)}
-            placeholder="엑셀 업로드 후 자동 입력"
-            className="text-right text-xs border border-gray-200 rounded-lg px-2.5 py-1 w-40 focus:outline-none focus:ring-1 focus:ring-orange-400 placeholder:text-gray-300 bg-gray-50" />
-        </InfoRow>
+        <h3 className="text-sm font-bold text-gray-700 flex items-center gap-2 mb-3">
+          <span className="w-1 h-4 bg-blue-400 rounded-full inline-block" />
+          상세 전체 현황
+        </h3>
+        <div className="overflow-x-auto -mx-1">
+          <table className="w-full text-sm border-collapse" style={{ minWidth: 1300 }}>
+            <thead>
+              <tr className="bg-gray-50 border-b border-gray-200">
+                {headers.map(h => (
+                  <th key={h} className="text-left text-xs font-semibold text-gray-500 px-3 py-2.5 whitespace-nowrap">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {records.map(r => {
+                const opStatus = getOperationStatus(r)
+                const idx = getCurrentMonthIndex(r.joinMonth)
+                const total = getTotalActivities(r)
+                return (
+                  <tr key={r.id} className="hover:bg-orange-50/30 transition-colors">
+                    <td className="px-3 py-3 font-semibold text-gray-800 whitespace-nowrap">{r.mentorName}</td>
+                    <td className="px-3 py-3 text-gray-600 whitespace-nowrap">{r.menteeName}</td>
+                    <td className="px-3 py-3">
+                      <input
+                        type="email"
+                        value={r.mentorEmail}
+                        onChange={e => onUpdate(r.id, rec => ({ ...rec, mentorEmail: e.target.value }))}
+                        placeholder="이메일 입력"
+                        className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 w-44 focus:outline-none focus:ring-1 focus:ring-orange-400"
+                      />
+                    </td>
+                    <td className="px-3 py-3 text-gray-600 whitespace-nowrap">{r.joinMonth}</td>
+                    <td className="px-3 py-3 whitespace-nowrap">
+                      <div className="flex flex-col gap-0.5">
+                        <span className="text-xs text-gray-700 font-medium">
+                          {getMentoringPeriod(r.joinMonth).start} ~ {getMentoringPeriod(r.joinMonth).end}
+                        </span>
+                        <div className="space-y-0.5">
+                          {([1, 2, 3] as const).map(mi => (
+                            <div key={mi} className="text-xs text-gray-400">
+                              {mi}개월차: {getMonthStartDate(r.joinMonth, mi)} ~ {getMonthEndDate(r.joinMonth, mi)}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-3 py-3 text-xs font-semibold text-gray-700 whitespace-nowrap">{getEndMonth(r.joinMonth)}</td>
+                    <td className="px-3 py-3"><OperationBadge status={opStatus} /></td>
+                    <td className="px-3 py-3 text-center text-gray-600 whitespace-nowrap">
+                      {idx >= 1 && idx <= 3 ? `${idx}개월차` : idx === 4 ? '종료' : '-'}
+                    </td>
+                    <td className="px-3 py-3 text-center font-bold text-gray-800">{total}회</td>
+                    {([1, 2, 3] as const).map(mi => (
+                      <td key={mi} className="px-3 py-3 text-right whitespace-nowrap">
+                        <div className="flex flex-col items-end gap-0.5">
+                          <span className={`text-xs font-bold ${getMonthlySupportAmount(r, mi) > 0 ? 'text-orange-600' : 'text-gray-400'}`}>
+                            {fmtAmount(getMonthlySupportAmount(r, mi))}
+                          </span>
+                          <span className="text-xs text-gray-400">{getMonthActivities(r, mi)}회</span>
+                        </div>
+                      </td>
+                    ))}
+                    <td className="px-3 py-3 text-right font-bold text-gray-800 whitespace-nowrap">
+                      {fmtAmount(getTotalSupportAmount(r))}
+                    </td>
+                    <td className="px-3 py-3"><PhotoBadge uploaded={hasPhotoUploaded(r)} /></td>
+                    <td className="px-3 py-3"><ReceiptBadge uploaded={hasReceiptUploaded(r)} /></td>
+                    <td className="px-3 py-3">
+                      <button onClick={() => setDetailId(r.id)}
+                        className="text-xs px-2.5 py-1.5 border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors whitespace-nowrap">
+                        활동 상세
+                      </button>
+                    </td>
+                    <td className="px-3 py-3"><MailBadge status={getInitialGuideStatus(r)} /></td>
+                    <td className="px-3 py-3"><MailBadge status={getMonthlyProposalGuideStatus(r)} /></td>
+                    <td className="px-3 py-3">
+                      <label className="flex items-center gap-1.5 cursor-pointer">
+                        <input type="checkbox" checked={getProposalSubmitStatus(r)}
+                          onChange={e => onUpdate(r.id, rec => ({ ...rec, proposalSubmitted: e.target.checked }))}
+                          className="w-4 h-4 accent-orange-500 cursor-pointer" />
+                        <span className={`text-xs font-medium ${r.proposalSubmitted ? 'text-green-600' : 'text-gray-400'}`}>
+                          {r.proposalSubmitted ? '완료' : '미등록'}
+                        </span>
+                      </label>
+                    </td>
+                    <td className="px-3 py-3"><CopyLinkBtn token={r.token} /></td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
       </div>
-      <MailPanel fixedRecipients={fixedRecipients} defaultSubject={defaultSubject} mailSent={mailSent} onSend={onSendMail} />
-    </div>
+
+      {detailRecord && <ActivityDetailModal record={detailRecord} onClose={() => setDetailId(null)} />}
+    </>
   )
 }
 
-// ─── 엑셀 업로드 버튼 ─────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Admin Tab: Initial Mail
+// ─────────────────────────────────────────────────────────────────────────────
 
-function ExcelUploadBtn({ onParsed }: { onParsed: (data: Record<number, ExcelSheetData>) => void }) {
-  const ref = useRef<HTMLInputElement>(null)
-  const [fileName, setFileName] = useState<string | null>(null)
-  const [parsing,  setParsing]  = useState(false)
+function AdminInitialMailTab({ records, onUpdate }: {
+  records: MentoringRecord[]
+  onUpdate: (id: string, fn: (r: MentoringRecord) => MentoringRecord) => void
+}) {
+  const [previewId, setPreviewId] = useState<string | null>(null)
+  const [sending, setSending] = useState<string | null>(null)
 
-  async function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (!file) return
-    setParsing(true)
+  const handleSend = async (r: MentoringRecord) => {
+    setSending(r.id)
     try {
-      const buf  = await file.arrayBuffer()
-      const data = parseExcelFile(buf)
-      setFileName(file.name)
-      onParsed(data)
-    } catch {
-      alert('엑셀 파싱 실패: 파일 형식을 확인해주세요.')
+      await sendInitialGuideMail(r)
     } finally {
-      setParsing(false)
-      if (ref.current) ref.current.value = ''
+      setSending(null)
     }
+    onUpdate(r.id, rec => ({ ...rec, initialGuideMailStatus: 'sent' }))
   }
 
   return (
-    <div className="flex items-center gap-2">
-      {fileName && (
-        <span className="text-xs text-emerald-600 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-lg">
-          ✓ {fileName}
-        </span>
-      )}
-      <button onClick={() => ref.current?.click()} disabled={parsing}
-        className="inline-flex items-center gap-1.5 text-xs font-semibold bg-blue-500 hover:bg-blue-600 text-white px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50">
-        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M8 2v8M4 7l4 4 4-4M2 12h12v2H2z" />
-        </svg>
-        {parsing ? '파싱 중…' : '엑셀 업로드'}
-      </button>
-      <input ref={ref} type="file" accept=".xlsx,.xls" className="hidden" onChange={handleChange} />
-    </div>
-  )
-}
-
-// ─── 직원 폼 필드 ─────────────────────────────────────────────────────────────
-
-function FormField({ label, value, onChange, placeholder, type = 'text', required = false }: {
-  label: string; value: string; onChange: (v: string) => void
-  placeholder?: string; type?: string; required?: boolean
-}) {
-  return (
-    <div>
-      <label className="text-xs font-semibold text-gray-500 block mb-1.5">
-        {label}{required && <span className="text-red-400 ml-0.5">*</span>}
-      </label>
-      <input type={type} value={value} onChange={e => onChange(e.target.value)}
-        placeholder={placeholder}
-        className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-orange-400 placeholder:text-gray-300" />
-    </div>
-  )
-}
-
-// ─── 직원 등록/수정 모달 ──────────────────────────────────────────────────────
-
-function EmployeeModal({
-  show, isEdit, form, submitting,
-  onChange, onSubmit, onClose,
-}: {
-  show: boolean; isEdit: boolean
-  form: EmployeeForm; submitting: boolean
-  onChange: (f: keyof EmployeeForm, v: string) => void
-  onSubmit: () => void; onClose: () => void
-}) {
-  if (!show) return null
-  return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
-        <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
-          <h3 className="font-bold text-gray-900">{isEdit ? '직원 정보 수정' : '신규 직원 등록'}</h3>
-          <button onClick={onClose} className="w-7 h-7 flex items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600 text-lg">✕</button>
-        </div>
-        <div className="px-6 py-5 space-y-3">
-          <FormField label="이름" value={form.name} onChange={v => onChange('name', v)} placeholder="홍길동" required />
-          <div className="grid grid-cols-2 gap-3">
-            <FormField label="실" value={form.division} onChange={v => onChange('division', v)} placeholder="경영지원실" />
-            <FormField label="팀" value={form.team} onChange={v => onChange('team', v)} placeholder="인사팀" />
+    <div className="space-y-3">
+      {records.map(r => (
+        <div key={r.id} className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+          <div className="flex items-center gap-4 px-5 py-4 flex-wrap gap-y-3">
+            <div className="flex items-center gap-3 flex-1 min-w-0">
+              <div className="w-9 h-9 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center font-bold text-sm flex-shrink-0">
+                {r.mentorName[0]}
+              </div>
+              <div className="min-w-0">
+                <p className="font-semibold text-gray-800 text-sm">
+                  {r.mentorName} <span className="text-gray-400 font-normal">멘토</span>
+                  <span className="mx-1.5 text-gray-300">→</span>
+                  {r.menteeName} <span className="text-gray-400 font-normal">멘티</span>
+                </p>
+                <p className="text-xs text-gray-400 mt-0.5 truncate">
+                  입사월: {r.joinMonth} · /mentor/{r.token}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 flex-shrink-0 flex-wrap gap-y-2">
+              {r.mentorEmail
+                ? <span className="text-xs px-2 py-0.5 rounded-lg bg-gray-50 border border-gray-200 text-gray-600 font-mono truncate max-w-[180px]">{r.mentorEmail}</span>
+                : <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 border border-red-200 text-red-600 font-semibold whitespace-nowrap">이메일 미등록</span>
+              }
+              <CopyLinkBtn token={r.token} />
+              <MailBadge status={r.initialGuideMailStatus} />
+              <button
+                onClick={() => setPreviewId(previewId === r.id ? null : r.id)}
+                className="text-xs px-2.5 py-1.5 border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors">
+                {previewId === r.id ? '미리보기 닫기' : '메일 미리보기'}
+              </button>
+              {sending === r.id
+                ? <span className="text-xs text-orange-500 font-semibold whitespace-nowrap">발송 중...</span>
+                : (
+                  <SendMailBtn
+                    status={r.initialGuideMailStatus}
+                    label="최초 안내 메일 발송"
+                    onSend={() => handleSend(r)}
+                    disabled={!r.mentorEmail || sending !== null}
+                  />
+                )
+              }
+            </div>
           </div>
-          <FormField label="팀장" value={form.leader} onChange={v => onChange('leader', v)} placeholder="이민수 팀장" />
-          <div className="grid grid-cols-2 gap-3">
-            <FormField label="입사일" type="date" value={form.join_date} onChange={v => onChange('join_date', v)} />
-            <FormField label="퇴사일" type="date" value={form.leave_date} onChange={v => onChange('leave_date', v)} />
+          {previewId === r.id && (
+            <div className="px-5 pb-5">
+              <MailPreview record={r} type="initial" />
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Admin Tab: Proposal Guide
+// ─────────────────────────────────────────────────────────────────────────────
+
+function AdminProposalTab({ records, onUpdate }: {
+  records: MentoringRecord[]
+  onUpdate: (id: string, fn: (r: MentoringRecord) => MentoringRecord) => void
+}) {
+  const [previewId, setPreviewId] = useState<string | null>(null)
+  const [sending, setSending] = useState<string | null>(null)
+  const targets = records.filter(r => getTotalSupportAmount(r) > 0)
+
+  const handleSend = async (r: MentoringRecord) => {
+    setSending(r.id)
+    try {
+      await sendMonthlyProposalMail(r)
+    } finally {
+      setSending(null)
+    }
+    onUpdate(r.id, rec => ({ ...rec, monthlyProposalMailStatus: 'sent' }))
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+        <p className="text-xs font-semibold text-amber-800">품의 안내 대상 기준</p>
+        <p className="text-xs text-amber-700 mt-0.5">
+          월별 활동 2회 이상으로 지원금이 발생한 멘토만 표시됩니다.
+          영수증 증빙은 본 대시보드에서 업로드하거나 내부망 품의 등록 시 첨부해주세요.
+        </p>
+      </div>
+
+      {targets.length === 0 && (
+        <div className="bg-white rounded-xl border border-dashed border-gray-200 py-10 flex items-center justify-center">
+          <p className="text-sm text-gray-400">품의 안내 대상이 없습니다</p>
+        </div>
+      )}
+
+      {targets.map(r => {
+        const photo   = hasPhotoUploaded(r)
+        const receipt = hasReceiptUploaded(r)
+        const total   = getTotalSupportAmount(r)
+        return (
+          <div key={r.id} className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+            <div className="flex items-center gap-4 px-5 py-4 flex-wrap gap-y-3">
+              <div className="flex items-center gap-3 flex-1 min-w-0">
+                <div className="w-9 h-9 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center font-bold text-sm flex-shrink-0">
+                  {r.mentorName[0]}
+                </div>
+                <div className="min-w-0">
+                  <p className="font-semibold text-gray-800 text-sm">{r.mentorName} / {r.menteeName}</p>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    입사월: {r.joinMonth} · 총 지급 예정: <span className="font-semibold text-orange-600">{fmtAmount(total)}</span>
+                    {' '}(1개월: {fmtAmount(getMonthlySupportAmount(r, 1))} / 2개월: {fmtAmount(getMonthlySupportAmount(r, 2))} / 3개월: {fmtAmount(getMonthlySupportAmount(r, 3))})
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 flex-shrink-0 flex-wrap gap-y-2">
+                {photo
+                  ? <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full border border-green-200 whitespace-nowrap">사진 등록됨</span>
+                  : <span className="text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded-full border border-red-200 whitespace-nowrap">활동 사진 미등록</span>
+                }
+                {receipt
+                  ? <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full border border-blue-200 whitespace-nowrap">영수증 등록됨</span>
+                  : <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full border border-amber-200 whitespace-nowrap">영수증 미등록</span>
+                }
+                <MailBadge status={r.monthlyProposalMailStatus} />
+                <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1.5 hover:bg-gray-100 transition-colors">
+                  <input type="checkbox" checked={r.proposalSubmitted}
+                    onChange={e => onUpdate(r.id, rec => ({ ...rec, proposalSubmitted: e.target.checked }))}
+                    className="w-3.5 h-3.5 accent-orange-500" />
+                  <span className={r.proposalSubmitted ? 'text-green-600 font-semibold' : ''}>
+                    {r.proposalSubmitted ? '품의 등록 완료' : '품의 등록 완료 체크'}
+                  </span>
+                </label>
+                <button
+                  onClick={() => setPreviewId(previewId === r.id ? null : r.id)}
+                  className="text-xs px-2.5 py-1.5 border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors">
+                  {previewId === r.id ? '미리보기 닫기' : '메일 미리보기'}
+                </button>
+                {sending === r.id
+                  ? <span className="text-xs text-orange-500 font-semibold whitespace-nowrap">발송 중...</span>
+                  : (
+                    <SendMailBtn
+                      status={r.monthlyProposalMailStatus}
+                      label="월말 품의 안내 메일 발송"
+                      onSend={() => handleSend(r)}
+                      disabled={sending !== null}
+                    />
+                  )
+                }
+              </div>
+            </div>
+            {previewId === r.id && (
+              <div className="px-5 pb-5">
+                <MailPreview record={r} type="proposal" />
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Admin Tab: Final Settlement
+// ─────────────────────────────────────────────────────────────────────────────
+
+function AdminSettlementTab({ records }: { records: MentoringRecord[] }) {
+  const [detailId, setDetailId] = useState<string | null>(null)
+  const detailRecord = detailId ? records.find(r => r.id === detailId) ?? null : null
+  return (
+    <div className="space-y-4">
+      <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3">
+        <p className="text-xs text-blue-800 font-semibold">안내사항</p>
+        <p className="text-xs text-blue-700 mt-0.5">
+          영수증 증빙은 멘토 전용 화면에서 업로드하거나, 내부망 품의 등록 시 첨부할 수 있습니다.
+          지원금은 월별 독립 계산이며 이월되지 않습니다.
+        </p>
+      </div>
+      <div className="overflow-x-auto -mx-1">
+        <table className="w-full text-sm border-collapse" style={{ minWidth: 1600 }}>
+          <thead>
+            <tr className="bg-gray-50 border-b border-gray-200">
+              {[
+                '멘토명', '멘티명', '입사월', '운영 기간', '지급 종료월',
+                '1개월 활동', '1개월 상태', '1개월 지급',
+                '2개월 활동', '2개월 상태', '2개월 지급',
+                '3개월 활동', '3개월 상태', '3개월 지급',
+                '총 활동', '사진', '영수증', '활동 상세',
+                '최종 총 지급', '최초 안내', '품의 안내', '내부망 품의', '운영 상태',
+              ].map(h => (
+                <th key={h} className="text-left text-xs font-semibold text-gray-500 px-3 py-2.5 whitespace-nowrap">{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {records.map(r => {
+              const allDone = getCurrentMonthIndex(r.joinMonth) === 4
+              const total = getTotalActivities(r)
+              const opStatus = getOperationStatus(r)
+              return (
+                <tr key={r.id} className="hover:bg-orange-50/30 transition-colors">
+                  <td className="px-3 py-3 font-semibold text-gray-800 whitespace-nowrap">{r.mentorName}</td>
+                  <td className="px-3 py-3 text-gray-600 whitespace-nowrap">{r.menteeName}</td>
+                  <td className="px-3 py-3 text-gray-600 whitespace-nowrap">{r.joinMonth}</td>
+                  <td className="px-3 py-3 whitespace-nowrap">
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-xs text-gray-700 font-medium">
+                        {getMentoringPeriod(r.joinMonth).start} ~ {getMentoringPeriod(r.joinMonth).end}
+                      </span>
+                      <div className="space-y-0.5">
+                        {([1, 2, 3] as const).map(mi => (
+                          <div key={mi} className="text-xs text-gray-400">
+                            {mi}개월차: {getMonthStartDate(r.joinMonth, mi)} ~ {getMonthEndDate(r.joinMonth, mi)}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-3 py-3 text-xs font-semibold text-gray-700 whitespace-nowrap">{getEndMonth(r.joinMonth)}</td>
+                  {([1, 2, 3] as const).flatMap(mi => [
+                    <td key={`act-${mi}`} className="px-3 py-3 text-center text-gray-700 font-medium">
+                      {getMonthActivities(r, mi)}회
+                    </td>,
+                    <td key={`st-${mi}`} className="px-3 py-3">
+                      <MonthBadge status={getMonthStatus(r, mi)} />
+                    </td>,
+                    <td key={`amt-${mi}`} className="px-3 py-3 text-right whitespace-nowrap">
+                      <span className={`text-xs font-bold ${getMonthlySupportAmount(r, mi) > 0 ? 'text-orange-600' : 'text-gray-400'}`}>
+                        {fmtAmount(getMonthlySupportAmount(r, mi))}
+                      </span>
+                    </td>,
+                  ])}
+                  <td className="px-3 py-3 text-center font-bold text-gray-800">{total}회</td>
+                  <td className="px-3 py-3"><PhotoBadge uploaded={hasPhotoUploaded(r)} /></td>
+                  <td className="px-3 py-3"><ReceiptBadge uploaded={hasReceiptUploaded(r)} /></td>
+                  <td className="px-3 py-3">
+                    <button onClick={() => setDetailId(r.id)}
+                      className="text-xs px-2.5 py-1.5 border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50 transition-colors whitespace-nowrap">
+                      활동 상세
+                    </button>
+                  </td>
+                  <td className="px-3 py-3 text-right font-bold text-gray-800 whitespace-nowrap">
+                    {fmtAmount(getTotalSupportAmount(r))}
+                  </td>
+                  <td className="px-3 py-3"><MailBadge status={r.initialGuideMailStatus} /></td>
+                  <td className="px-3 py-3"><MailBadge status={r.monthlyProposalMailStatus} /></td>
+                  <td className="px-3 py-3">
+                    {r.proposalSubmitted
+                      ? <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full border border-green-200 whitespace-nowrap">등록완료</span>
+                      : <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full border border-gray-200 whitespace-nowrap">미등록</span>
+                    }
+                  </td>
+                  <td className="px-3 py-3">
+                    <div className="flex flex-col gap-1">
+                      <OperationBadge status={opStatus} />
+                      {allDone && (
+                        <span className={`text-xs font-semibold ${total >= 3 ? 'text-green-600' : 'text-red-600'}`}>
+                          {total >= 3 ? '달성 완료' : '활동 미달'}
+                        </span>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {detailRecord && <ActivityDetailModal record={detailRecord} onClose={() => setDetailId(null)} />}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// New Mentoring Modal
+// ─────────────────────────────────────────────────────────────────────────────
+
+function NewMentoringModal({ onClose, onSave }: {
+  onClose: () => void
+  onSave: (r: MentoringRecord) => void
+}) {
+  const [mentorName, setMentorName]   = useState('')
+  const [menteeName, setMenteeName]   = useState('')
+  const [mentorEmail, setMentorEmail] = useState('')
+  const [joinMonth, setJoinMonth]     = useState('')
+
+  const period = joinMonth ? getMentoringPeriod(joinMonth) : null
+  const endMon = joinMonth ? getEndMonth(joinMonth) : null
+  const canSave = mentorName.trim() && menteeName.trim() && joinMonth
+
+  function handleSave() {
+    if (!canSave) return
+    const token = `mentor_${Math.random().toString(36).slice(2, 8)}`
+    const newRecord: MentoringRecord = {
+      id: Date.now().toString(),
+      mentorName: mentorName.trim(),
+      menteeName: menteeName.trim(),
+      mentorEmail: mentorEmail.trim(),
+      joinMonth,
+      token,
+      expectation: '',
+      cooperation: '',
+      activities: createEmptyActivities(joinMonth),
+      initialGuideMailStatus: 'pending',
+      monthlyProposalMailStatus: 'pending',
+      proposalSubmitted: false,
+    }
+    onSave(newRecord)
+    onClose()
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-5" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-bold text-gray-900">신규 멘토링 생성</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors text-xl leading-none">×</button>
+        </div>
+
+        <div className="space-y-3">
+          <div>
+            <label className="text-xs font-semibold text-gray-600 block mb-1">멘토명 <span className="text-red-400">*</span></label>
+            <input value={mentorName} onChange={e => setMentorName(e.target.value)} placeholder="예: 김멘토"
+              className="w-full text-sm border border-gray-200 rounded-xl px-3 py-2 focus:outline-none focus:ring-1 focus:ring-orange-400" />
           </div>
           <div>
-            <label className="text-xs font-semibold text-gray-500 block mb-1.5">상태</label>
-            <select value={form.status} onChange={e => onChange('status', e.target.value)}
-              className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-orange-400 bg-white">
-              <option value="active">재직중</option>
-              <option value="resigned">퇴사</option>
-            </select>
+            <label className="text-xs font-semibold text-gray-600 block mb-1">멘티명 <span className="text-red-400">*</span></label>
+            <input value={menteeName} onChange={e => setMenteeName(e.target.value)} placeholder="예: 이멘티"
+              className="w-full text-sm border border-gray-200 rounded-xl px-3 py-2 focus:outline-none focus:ring-1 focus:ring-orange-400" />
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-gray-600 block mb-1">멘토 이메일</label>
+            <input type="email" value={mentorEmail} onChange={e => setMentorEmail(e.target.value)} placeholder="예: mentor@company.com"
+              className="w-full text-sm border border-gray-200 rounded-xl px-3 py-2 focus:outline-none focus:ring-1 focus:ring-orange-400" />
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-gray-600 block mb-1">입사월 <span className="text-red-400">*</span></label>
+            <input type="month" value={joinMonth} onChange={e => setJoinMonth(e.target.value)}
+              className="w-full text-sm border border-gray-200 rounded-xl px-3 py-2 focus:outline-none focus:ring-1 focus:ring-orange-400" />
           </div>
         </div>
-        <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-2">
-          <button onClick={onClose} className="text-sm px-4 py-2 border border-gray-200 rounded-lg text-gray-600 hover:bg-gray-50">취소</button>
-          <button onClick={onSubmit} disabled={!form.name.trim() || submitting}
-            className="text-sm px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white rounded-lg font-semibold disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
-            {submitting ? '처리 중...' : isEdit ? '수정 완료' : '등록'}
+
+        {period && (
+          <div className="bg-orange-50 border border-orange-200 rounded-xl p-3.5 text-xs space-y-1">
+            <p className="font-semibold text-orange-700 mb-1.5">자동 생성 정보</p>
+            <div className="flex gap-2"><span className="text-orange-400 w-20">운영 기간</span><span className="font-medium text-orange-800">{period.start} ~ {period.end}</span></div>
+            <div className="flex gap-2"><span className="text-orange-400 w-20">지급 종료월</span><span className="font-medium text-orange-800">{endMon}</span></div>
+            <div className="flex gap-2"><span className="text-orange-400 w-20">활동 회차</span><span className="font-medium text-orange-800">1~9회차 초기 생성</span></div>
+            <div className="flex gap-2"><span className="text-orange-400 w-20">토큰</span><span className="text-gray-500">자동 생성</span></div>
+          </div>
+        )}
+
+        <div className="flex gap-2 pt-1">
+          <button onClick={onClose}
+            className="flex-1 text-sm font-semibold border border-gray-200 text-gray-600 py-2.5 rounded-xl hover:bg-gray-50 transition-colors">
+            취소
+          </button>
+          <button onClick={handleSave} disabled={!canSave}
+            className="flex-1 text-sm font-semibold bg-orange-500 hover:bg-orange-600 disabled:opacity-40 disabled:cursor-not-allowed text-white py-2.5 rounded-xl transition-colors">
+            생성하기
           </button>
         </div>
       </div>
@@ -568,485 +846,123 @@ function EmployeeModal({
   )
 }
 
-// ─── 메인 페이지 ──────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Main Admin Dashboard
+// ─────────────────────────────────────────────────────────────────────────────
 
-export default function HRDashboard() {
-  const [employees, setEmployees] = useState<Employee[]>([])
-  const [loading,   setLoading]   = useState(true)
-  const [error,     setError]     = useState<string | null>(null)
+type AdminSubTab = 'overview' | 'mail' | 'proposal' | 'settlement'
 
-  const [showForm,   setShowForm]   = useState(false)
-  const [editTarget, setEditTarget] = useState<Employee | null>(null)
-  const [form,       setForm]       = useState<EmployeeForm>(EMPTY_FORM)
-  const [submitting, setSubmitting] = useState(false)
+export default function AdminDashboard() {
+  const [records, setRecords] = useState<MentoringRecord[]>(INITIAL_DATA)
+  const [adminTab, setAdminTab] = useState<AdminSubTab>('overview')
+  const [showNewModal, setShowNewModal] = useState(false)
 
-  const [stageDone, setStageDone] = useState<Record<string, boolean>>({})
-  const [mailSent,  setMailSent]  = useState<Record<string, boolean>>({})
-
-  const [cafeExcel,    setCafeExcel]    = useState<Record<number, ExcelSheetData>>({})
-  const [wellnessExcel, setWellnessExcel] = useState<Record<number, ExcelSheetData>>({})
-
-  const newHires   = employees.filter(e => e.status === 'active')
-  const departures = employees.filter(e => e.status === 'resigned')
-
-  const todayStr   = new Date().toISOString().slice(0, 10)
-  const todayHires = newHires.filter(h  => h.join_date  === todayStr).length
-  const todayLeaves = departures.filter(d => d.leave_date === todayStr).length
-  const pendingNotif = newHires.filter(h  => !mailSent[`hire_notif_${h.id}`]).length
-                     + departures.filter(d => !mailSent[`leave_notif_${d.id}`]).length
-  const pendingMail = [
-    ...newHires.flatMap(e  => [`hire_cafe_${e.id}`,  `hire_wellness_${e.id}`]),
-    ...departures.flatMap(e => [`leave_cafe_${e.id}`, `leave_wellness_${e.id}`]),
-  ].filter(k => !mailSent[k]).length
-
-  // ── 데이터 로드 ───────────────────────────────────────────────────────────
-
-  async function fetchAllData() {
-    setLoading(true)
-    setError(null)
-
-    const [empRes, taskRes, notifRes, pointRes] = await Promise.all([
-      supabase.from('employees').select('*').order('created_at', { ascending: false }),
-      supabase.from('onboarding_tasks').select('employee_id,stage_id,is_done,mail_sent'),
-      supabase.from('notifications').select('employee_id,notification_type,mail_sent'),
-      supabase.from('point_requests').select('employee_id,employee_type,point_type,mail_sent'),
-    ])
-
-    if (empRes.error) { setError(empRes.error.message); setLoading(false); return }
-    setEmployees(empRes.data ?? [])
-
-    const newDone: Record<string, boolean> = {}
-    const newMail: Record<string, boolean> = {}
-
-    for (const t of (taskRes.data ?? [])) {
-      if (t.is_done)   newDone[`${t.employee_id}_${t.stage_id}`]      = true
-      if (t.mail_sent) newMail[`mail_${t.employee_id}_${t.stage_id}`] = true
-    }
-    for (const n of (notifRes.data ?? [])) {
-      const k = n.notification_type === 'hire'
-        ? `hire_notif_${n.employee_id}`
-        : `leave_notif_${n.employee_id}`
-      if (n.mail_sent) newMail[k] = true
-    }
-    for (const p of (pointRes.data ?? [])) {
-      const k = `${p.employee_type}_${p.point_type}_${p.employee_id}`
-      if (p.mail_sent) newMail[k] = true
-    }
-
-    setStageDone(newDone)
-    setMailSent(newMail)
-    setLoading(false)
+  function updateRecord(id: string, fn: (r: MentoringRecord) => MentoringRecord) {
+    setRecords(prev => prev.map(r => r.id === id ? fn(r) : r))
   }
 
-  // ── CRUD ──────────────────────────────────────────────────────────────────
-
-  async function handleSubmit() {
-    if (!form.name.trim()) return
-    setSubmitting(true)
-    const payload = {
-      name:       form.name.trim(),
-      join_date:  form.join_date  || null,
-      leave_date: form.leave_date || null,
-      division:   form.division   || null,
-      team:       form.team       || null,
-      leader:     form.leader     || null,
-      status:     form.status,
-    }
-    const { error } = editTarget
-      ? await supabase.from('employees').update(payload).eq('id', editTarget.id)
-      : await supabase.from('employees').insert(payload)
-
-    if (error) setError(error.message)
-    else       closeForm()
-    setSubmitting(false)
-    fetchAllData()
+  function addRecord(r: MentoringRecord) {
+    setRecords(prev => [...prev, r])
   }
 
-  async function handleDelete(id: string, name: string) {
-    if (!confirm(`"${name}" 직원을 삭제하시겠습니까?\n관련 데이터도 함께 삭제됩니다.`)) return
-    const { error } = await supabase.from('employees').delete().eq('id', id)
-    if (error) setError(error.message)
-    else       fetchAllData()
+  const stats = {
+    total:          records.length,
+    achieved:       records.filter(r => getTotalActivities(r) >= 3).length,
+    initialSent:    records.filter(r => r.initialGuideMailStatus === 'sent').length,
+    proposalNeeded: records.filter(r => getTotalSupportAmount(r) > 0).length,
+    proposalSent:   records.filter(r => r.monthlyProposalMailStatus === 'sent').length,
+    proposalDone:   records.filter(r => r.proposalSubmitted).length,
+    underactive:    records.filter(r => getOperationStatus(r) === '활동 미달').length,
   }
 
-  function openAdd() { setEditTarget(null); setForm(EMPTY_FORM); setShowForm(true) }
-  function openEdit(emp: Employee) {
-    setEditTarget(emp)
-    setForm({
-      name:       emp.name,
-      join_date:  emp.join_date  ?? '',
-      leave_date: emp.leave_date ?? '',
-      division:   emp.division   ?? '',
-      team:       emp.team       ?? '',
-      leader:     emp.leader     ?? '',
-      status:     emp.status,
-    })
-    setShowForm(true)
-  }
-  function closeForm() { setShowForm(false); setEditTarget(null); setForm(EMPTY_FORM) }
+  const summaryCards = [
+    { label: '전체 멘토링',          value: stats.total,          color: 'bg-orange-500', light: 'bg-orange-50',  text: 'text-orange-600',  ring: 'ring-orange-200'  },
+    { label: '3회 이상 달성',         value: stats.achieved,        color: 'bg-green-500',  light: 'bg-green-50',   text: 'text-green-600',   ring: 'ring-green-200'   },
+    { label: '최초 안내 발송완료',    value: stats.initialSent,     color: 'bg-blue-500',   light: 'bg-blue-50',    text: 'text-blue-600',    ring: 'ring-blue-200'    },
+    { label: '품의 안내 필요',        value: stats.proposalNeeded,  color: 'bg-purple-500', light: 'bg-purple-50',  text: 'text-purple-600',  ring: 'ring-purple-200'  },
+    { label: '품의 안내 발송완료',    value: stats.proposalSent,    color: 'bg-teal-500',   light: 'bg-teal-50',    text: 'text-teal-600',    ring: 'ring-teal-200'    },
+    { label: '내부망 품의 등록 완료', value: stats.proposalDone,    color: 'bg-indigo-500', light: 'bg-indigo-50',  text: 'text-indigo-600',  ring: 'ring-indigo-200'  },
+    { label: '활동 미달 대상',        value: stats.underactive,     color: 'bg-red-500',    light: 'bg-red-50',     text: 'text-red-600',     ring: 'ring-red-200'     },
+  ]
 
-  // ── DB 연동 ───────────────────────────────────────────────────────────────
-
-  async function toggleDone(empId: string, stageId: string) {
-    const key     = `${empId}_${stageId}`
-    const newDone = !stageDone[key]
-    setStageDone(p => ({ ...p, [key]: newDone }))
-
-    const stage = STAGES.find(s => s.id === stageId)!
-    const { error } = await supabase.from('onboarding_tasks').upsert({
-      employee_id: empId,
-      stage_id:    stageId,
-      stage_label: stage.label,
-      timing:      stage.timing,
-      sort_order:  STAGES.indexOf(stage),
-      is_done:     newDone,
-      done_at:     newDone ? new Date().toISOString() : null,
-    }, { onConflict: 'employee_id,stage_id' })
-
-    if (error) {
-      setError(error.message)
-      setStageDone(p => ({ ...p, [key]: !newDone }))
-    }
-  }
-
-  async function sendMail(key: string) {
-    setMailSent(p => ({ ...p, [key]: true }))
-
-    let dbErr: string | null = null
-
-    if (key.startsWith('hire_notif_') || key.startsWith('leave_notif_')) {
-      const isHire = key.startsWith('hire_notif_')
-      const empId  = key.replace(isHire ? 'hire_notif_' : 'leave_notif_', '')
-      const { error } = await supabase.from('notifications').upsert({
-        employee_id:       empId,
-        notification_type: isHire ? 'hire' : 'leave',
-        fixed_recipients:  isHire ? [...FR.hire] : [...FR.leave],
-        extra_recipients:  [],
-        mail_sent:         true,
-        mail_sent_at:      new Date().toISOString(),
-      }, { onConflict: 'employee_id,notification_type' })
-      dbErr = error?.message ?? null
-
-    } else if (/^(hire|leave)_(cafe|wellness)_/.test(key)) {
-      const m = key.match(/^(hire|leave)_(cafe|wellness)_(.+)$/)!
-      const empType   = m[1] as string
-      const pointType = m[2] as string
-      const empId     = m[3] as string
-      const emp     = employees.find(e => e.id === empId)
-      const dateStr = empType === 'hire' ? emp?.join_date ?? null : emp?.leave_date ?? null
-      const { error } = await supabase.from('point_requests').upsert({
-        employee_id:      empId,
-        employee_type:    empType,
-        point_type:       pointType,
-        base_month:       formatMonth(dateStr),
-        extra_recipients: [],
-        mail_sent:        true,
-        mail_sent_at:     new Date().toISOString(),
-      }, { onConflict: 'employee_id,point_type' })
-      dbErr = error?.message ?? null
-
-    } else if (key.startsWith('mail_')) {
-      const match = key.match(/^mail_(.+)_(s\d+)$/)
-      if (match) {
-        const [, empId, stageId] = match
-        const stage = STAGES.find(s => s.id === stageId)!
-        const { error } = await supabase.from('onboarding_tasks').upsert({
-          employee_id:  empId,
-          stage_id:     stageId,
-          stage_label:  stage.label,
-          timing:       stage.timing,
-          sort_order:   STAGES.indexOf(stage),
-          mail_sent:    true,
-          mail_sent_at: new Date().toISOString(),
-        }, { onConflict: 'employee_id,stage_id' })
-        dbErr = error?.message ?? null
-      }
-    }
-
-    if (dbErr) {
-      setError(dbErr)
-      setMailSent(p => ({ ...p, [key]: false }))
-    }
-  }
-
-  useEffect(() => { fetchAllData() }, [])
-
-  // ── 렌더 ──────────────────────────────────────────────────────────────────
+  const subTabs: { id: AdminSubTab; label: string }[] = [
+    { id: 'overview',   label: '전체 현황' },
+    { id: 'mail',       label: '안내 메일' },
+    { id: 'proposal',   label: '품의 안내' },
+    { id: 'settlement', label: '최종 정산' },
+  ]
 
   return (
     <main className="min-h-screen bg-slate-50">
 
-      <EmployeeModal
-        show={showForm} isEdit={!!editTarget}
-        form={form} submitting={submitting}
-        onChange={(f, v) => setForm(p => ({ ...p, [f]: v }))}
-        onSubmit={handleSubmit}
-        onClose={closeForm}
-      />
-
       <header className="bg-white border-b border-gray-200 sticky top-0 z-20 shadow-sm">
-        <div className="max-w-screen-xl mx-auto px-6 h-14 flex items-center justify-between">
-          <div className="flex items-center gap-3">
+        <div className="max-w-screen-xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-2.5">
             <div className="w-7 h-7 bg-orange-500 rounded-lg flex items-center justify-center flex-shrink-0">
               <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a4 4 0 00-5-3.87M9 20H4v-2a4 4 0 015-3.87m6 5.87a4 4 0 10-8 0m4-8a4 4 0 100-8 4 4 0 000 8z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
               </svg>
             </div>
-            <span className="text-sm font-bold text-gray-900">입퇴사자 관리 대시보드</span>
-            <span className="text-xs text-gray-400 hidden sm:inline">Hecto Innovation HR</span>
+            <div>
+              <span className="text-sm font-bold text-gray-900">멘토링 운영 대시보드</span>
+              <span className="hidden sm:inline text-xs text-gray-400 ml-2">관리자</span>
+            </div>
           </div>
           <div className="flex items-center gap-3">
-            <button onClick={openAdd}
-              className="inline-flex items-center gap-1.5 text-xs font-semibold bg-orange-500 hover:bg-orange-600 text-white px-3 py-1.5 rounded-lg transition-colors">
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 16 16" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M8 3v10M3 8h10" />
-              </svg>
-              직원 등록
+            <span className="hidden sm:inline text-xs text-gray-400">
+              멘토 전용: <code className="bg-gray-100 px-1.5 py-0.5 rounded text-gray-600">/mentor/[token]</code>
+            </span>
+            <span className="text-xs text-gray-400 font-mono">{TODAY}</span>
+            <button
+              onClick={() => setShowNewModal(true)}
+              className="flex items-center gap-1.5 text-xs font-semibold bg-orange-500 hover:bg-orange-600 active:scale-95 text-white px-3 py-1.5 rounded-lg transition-all whitespace-nowrap">
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" /></svg>
+              신규 멘토링
             </button>
-            <span className="text-xs text-gray-400">{todayStr}</span>
-            <div className="w-7 h-7 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center text-xs font-bold">HR</div>
           </div>
         </div>
       </header>
 
-      <div className="max-w-screen-xl mx-auto px-6 py-7 space-y-12">
+      <div className="max-w-screen-xl mx-auto px-4 sm:px-6 py-6 space-y-6">
 
-        {error && (
-          <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3 flex items-center justify-between">
-            <span className="text-sm text-red-600">⚠️ {error}</span>
-            <button onClick={() => setError(null)} className="text-red-400 hover:text-red-600 text-sm ml-4">닫기</button>
-          </div>
-        )}
-
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          {[
-            { label: '처리 필요 알림', value: loading ? '…' : pendingNotif, sub: '알림 미발송 건',  icon: '🔔', bg: 'bg-orange-500', ring: 'ring-orange-200' },
-            { label: '오늘 신규 입사자', value: loading ? '…' : todayHires,   sub: `${todayStr} 입사`, icon: '👋', bg: 'bg-blue-500',   ring: 'ring-blue-200'   },
-            { label: '오늘 퇴사자',     value: loading ? '…' : todayLeaves,  sub: `${todayStr} 퇴사`, icon: '📦', bg: 'bg-purple-500', ring: 'ring-purple-200' },
-            { label: '미발송 메일',     value: loading ? '…' : pendingMail,  sub: '포인트 발송 대기', icon: '📧', bg: 'bg-red-500',    ring: 'ring-red-200'    },
-          ].map(c => (
-            <div key={c.label} className={`bg-white rounded-xl ring-1 ${c.ring} p-5 flex items-center gap-4 shadow-sm`}>
-              <div className={`${c.bg} w-11 h-11 rounded-xl flex items-center justify-center text-xl flex-shrink-0`}>{c.icon}</div>
-              <div className="min-w-0">
-                <p className="text-xs font-medium text-gray-500 truncate">{c.label}</p>
-                <p className="text-2xl font-black text-gray-900 leading-none my-0.5">{c.value}</p>
-                <p className="text-xs text-gray-400 truncate">{c.sub}</p>
+        {/* Summary Cards */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+          {summaryCards.map(c => (
+            <div key={c.label} className={`bg-white rounded-xl ring-1 ${c.ring} p-4 shadow-sm flex flex-col gap-2`}>
+              <div className={`${c.light} w-9 h-9 rounded-xl flex items-center justify-center`}>
+                <span className={`${c.text} font-black text-lg leading-none`}>{c.value}</span>
               </div>
+              <p className="text-xs text-gray-500 leading-snug">{c.label}</p>
             </div>
           ))}
         </div>
 
-        {loading && (
-          <div className="flex items-center justify-center py-20 gap-3 text-gray-400">
-            <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
-            </svg>
-            <span className="text-sm">직원 데이터를 불러오는 중...</span>
+        {/* Sub-tabs */}
+        <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+          <div className="border-b border-gray-100 px-5 pt-4 flex gap-0.5 overflow-x-auto">
+            {subTabs.map(t => (
+              <button key={t.id} onClick={() => setAdminTab(t.id)}
+                className={`text-sm font-semibold px-4 py-2.5 rounded-t-lg whitespace-nowrap border-b-2 transition-colors ${adminTab === t.id ? 'border-orange-500 text-orange-600 bg-orange-50/50' : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'}`}>
+                {t.label}
+              </button>
+            ))}
           </div>
-        )}
+          <div className="p-5">
+            {adminTab === 'overview'   && <AdminOverviewTab   records={records} onUpdate={updateRecord} />}
+            {adminTab === 'mail'       && <AdminInitialMailTab records={records} onUpdate={updateRecord} />}
+            {adminTab === 'proposal'   && <AdminProposalTab   records={records} onUpdate={updateRecord} />}
+            {adminTab === 'settlement' && <AdminSettlementTab records={records} />}
+          </div>
+        </div>
 
-        {!loading && (
-          <>
-
-          {/* ── 1. 입사자 알림 관리 ── */}
-          <section>
-            <SectionHead icon="👋" title="입사자 알림 관리"
-              desc="신규 입사자 등록 시 인사팀·총무팀 알림 발송"
-              badge={`${newHires.length}명`}
-              action={
-                <button onClick={openAdd}
-                  className="text-xs font-semibold text-orange-600 hover:text-orange-700 bg-orange-50 hover:bg-orange-100 border border-orange-200 px-2.5 py-1 rounded-lg transition-colors">
-                  + 입사자 추가
-                </button>
-              }
-            />
-            {newHires.length === 0 ? (
-              <EmptyState label="등록된 입사자가 없습니다" />
-            ) : (
-              <div className="space-y-2">
-                {newHires.map(h => (
-                  <NotifRow key={h.id}
-                    name={h.name}
-                    date={h.join_date ?? '-'}
-                    division={h.division ?? ''}
-                    team={h.team ?? ''}
-                    mailSent={!!mailSent[`hire_notif_${h.id}`]}
-                    onSend={() => sendMail(`hire_notif_${h.id}`)}
-                    onEdit={() => openEdit(h)}
-                    onDelete={() => handleDelete(h.id, h.name)}
-                  />
-                ))}
-              </div>
-            )}
-          </section>
-
-          {/* ── 2. 입사자별 온보딩 ── */}
-          <section>
-            <SectionHead icon="🚀" title="입사자별 온보딩 관리"
-              desc="카드를 펼쳐 단계별 완료 체크 · 메일 발송"
-              badge={`${newHires.length}명`}
-            />
-            {newHires.length === 0 ? <EmptyState label="등록된 입사자가 없습니다" /> : (
-              <div className="space-y-3">
-                {newHires.map(hire => (
-                  <OnboardingCard key={hire.id}
-                    hire={hire}
-                    stageDone={stageDone}
-                    mailSent={mailSent}
-                    onToggleDone={toggleDone}
-                    onSendMail={sendMail}
-                  />
-                ))}
-              </div>
-            )}
-          </section>
-
-          {/* ── 3. 입사자 카페포인트 ── */}
-          <section>
-            <SectionHead icon="☕" title="입사자 카페포인트 메일 발송 관리"
-              desc="엑셀 업로드 → 일할 계산 금액 자동 입력 → 메일 발송"
-              badge={`${newHires.length}명`}
-              action={<ExcelUploadBtn onParsed={setCafeExcel} />}
-            />
-            {newHires.length === 0 ? <EmptyState label="등록된 입사자가 없습니다" /> : (
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
-                {newHires.map(e => {
-                  const key = `hire_cafe_${e.id}`
-                  return (
-                    <PointCard key={e.id}
-                      name={e.name} dateLabel="입사일" date={e.join_date ?? '-'}
-                      baseMonth={formatMonth(e.join_date)}
-                      mailSent={!!mailSent[key]} onSendMail={() => sendMail(key)}
-                      fixedRecipients={FR.cafe}
-                      defaultSubject={`[카페포인트 안내] ${e.name} 님 ${e.join_date ?? ''} 입사 · ${e.division ?? ''} ${e.team ?? ''} ${formatMonth(e.join_date)} 일할 계산`}
-                      autoAmount={lookupExcelAmount(cafeExcel, e.join_date, 'hire')}
-                    />
-                  )
-                })}
-              </div>
-            )}
-          </section>
-
-          {/* ── 4. 입사자 웰니스 포인트 ── */}
-          <section>
-            <SectionHead icon="💚" title="입사자 웰니스 포인트 메일 발송 관리"
-              desc="엑셀 업로드 → 일할 계산 금액 자동 입력 → 메일 발송"
-              badge={`${newHires.length}명`}
-              action={<ExcelUploadBtn onParsed={setWellnessExcel} />}
-            />
-            {newHires.length === 0 ? <EmptyState label="등록된 입사자가 없습니다" /> : (
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
-                {newHires.map(e => {
-                  const key = `hire_wellness_${e.id}`
-                  return (
-                    <PointCard key={e.id}
-                      name={e.name} dateLabel="입사일" date={e.join_date ?? '-'}
-                      baseMonth={formatMonth(e.join_date)}
-                      mailSent={!!mailSent[key]} onSendMail={() => sendMail(key)}
-                      fixedRecipients={FR.wellness}
-                      defaultSubject={`[웰니스포인트 안내] ${e.name} 님 ${e.join_date ?? ''} 입사 · ${e.division ?? ''} ${e.team ?? ''} ${formatMonth(e.join_date)} 일할 계산`}
-                      autoAmount={lookupExcelAmount(wellnessExcel, e.join_date, 'hire')}
-                    />
-                  )
-                })}
-              </div>
-            )}
-          </section>
-
-          {/* ── 5. 퇴사자 알림 관리 ── */}
-          <section>
-            <SectionHead icon="🚪" title="퇴사자 알림 관리"
-              desc="퇴사자 등록 시 인사팀·총무팀·보안인프라팀 알림 발송"
-              badge={`${departures.length}명`}
-              action={
-                <button onClick={() => { setForm({ ...EMPTY_FORM, status: 'resigned' }); setEditTarget(null); setShowForm(true) }}
-                  className="text-xs font-semibold text-purple-600 hover:text-purple-700 bg-purple-50 hover:bg-purple-100 border border-purple-200 px-2.5 py-1 rounded-lg transition-colors">
-                  + 퇴사자 추가
-                </button>
-              }
-            />
-            {departures.length === 0 ? <EmptyState label="등록된 퇴사자가 없습니다" /> : (
-              <div className="space-y-2">
-                {departures.map(d => (
-                  <NotifRow key={d.id}
-                    name={d.name}
-                    date={d.leave_date ?? '-'}
-                    division={d.division ?? ''}
-                    team={d.team ?? ''}
-                    mailSent={!!mailSent[`leave_notif_${d.id}`]}
-                    onSend={() => sendMail(`leave_notif_${d.id}`)}
-                    onEdit={() => openEdit(d)}
-                    onDelete={() => handleDelete(d.id, d.name)}
-                  />
-                ))}
-              </div>
-            )}
-          </section>
-
-          {/* ── 6. 퇴사자 카페포인트 ── */}
-          <section>
-            <SectionHead icon="🧾" title="퇴사자 카페포인트 메일 발송 관리"
-              desc="엑셀 업로드 → 일할 계산 금액 자동 입력 → 메일 발송"
-              badge={`${departures.length}명`}
-              action={<ExcelUploadBtn onParsed={data => setCafeExcel(prev => ({ ...prev, ...data }))} />}
-            />
-            {departures.length === 0 ? <EmptyState label="등록된 퇴사자가 없습니다" /> : (
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
-                {departures.map(e => {
-                  const key = `leave_cafe_${e.id}`
-                  return (
-                    <PointCard key={e.id}
-                      name={e.name} dateLabel="퇴사일" date={e.leave_date ?? '-'}
-                      baseMonth={formatMonth(e.leave_date)}
-                      mailSent={!!mailSent[key]} onSendMail={() => sendMail(key)}
-                      fixedRecipients={FR.cafe}
-                      defaultSubject={`[카페포인트 정산] ${e.name} 님 ${e.leave_date ?? ''} 퇴사 · ${e.division ?? ''} ${e.team ?? ''} ${formatMonth(e.leave_date)} 일할 계산`}
-                      autoAmount={lookupExcelAmount(cafeExcel, e.leave_date, 'leave')}
-                    />
-                  )
-                })}
-              </div>
-            )}
-          </section>
-
-          {/* ── 7. 퇴사자 웰니스 포인트 ── */}
-          <section>
-            <SectionHead icon="💼" title="퇴사자 웰니스 포인트 메일 발송 관리"
-              desc="엑셀 업로드 → 일할 계산 금액 자동 입력 → 메일 발송"
-              badge={`${departures.length}명`}
-              action={<ExcelUploadBtn onParsed={data => setWellnessExcel(prev => ({ ...prev, ...data }))} />}
-            />
-            {departures.length === 0 ? <EmptyState label="등록된 퇴사자가 없습니다" /> : (
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
-                {departures.map(e => {
-                  const key = `leave_wellness_${e.id}`
-                  return (
-                    <PointCard key={e.id}
-                      name={e.name} dateLabel="퇴사일" date={e.leave_date ?? '-'}
-                      baseMonth={formatMonth(e.leave_date)}
-                      mailSent={!!mailSent[key]} onSendMail={() => sendMail(key)}
-                      fixedRecipients={FR.wellness}
-                      defaultSubject={`[웰니스포인트 정산] ${e.name} 님 ${e.leave_date ?? ''} 퇴사 · ${e.division ?? ''} ${e.team ?? ''} ${formatMonth(e.leave_date)} 일할 계산`}
-                      autoAmount={lookupExcelAmount(wellnessExcel, e.leave_date, 'leave')}
-                    />
-                  )
-                })}
-              </div>
-            )}
-          </section>
-
-          </>
-        )}
       </div>
-    </main>
-  )
-}
 
-function EmptyState({ label }: { label: string }) {
-  return (
-    <div className="bg-white rounded-xl border border-dashed border-gray-200 py-10 flex items-center justify-center">
-      <p className="text-sm text-gray-400">{label}</p>
-    </div>
+      {showNewModal && (
+        <NewMentoringModal
+          onClose={() => setShowNewModal(false)}
+          onSave={addRecord}
+        />
+      )}
+    </main>
   )
 }
