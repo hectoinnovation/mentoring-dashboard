@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "행사 참석 현황 대시보드",
-  description: "HR Event Response Dashboard",
+  title: "멘토링 운영 대시보드",
+  description: "Hecto Innovation HR Mentoring Dashboard",
 };
 
 export default function RootLayout({
