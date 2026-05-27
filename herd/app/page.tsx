@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useEffect } from 'react'
 import {
-  MentoringRecord, MentoringStatus, UploadStatus, MentoringGoals,
+  MentoringRecord, MentoringStatus, UploadStatus, MentoringGoals, MonthData,
   INITIAL_DATA, createEmptyMonths, createEmptyGoals, generateToken,
   calcDatesFromJoinMonth, fmtPeriodMonthly, TODAY,
   getMonthYM, getCurrentMonthIndex, getMonthDataForYM,
@@ -47,6 +47,70 @@ const blankForm = () => ({
   uploadBlockReason: '', note: '',
 })
 type FormState = ReturnType<typeof blankForm>
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 계산 예시 데이터 (지급 로직 검증용)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const SETTLEMENT_EXAMPLES: { label: string; desc: string; md: MonthData }[] = [
+  {
+    label: '예시A',
+    desc: '사진+비용 1회(30,000원) + 사진만 2회 → 한도 100,000원',
+    md: {
+      monthIndex: 3,
+      activities: [
+        { id:'ex-a-1', activityDate:'2026-01-05', content:'활동', memo:'', photoName:'photo.jpg', photoUrl:'', hasCost:true,  costAmount:30000, receiptName:'receipt.jpg', receiptUrl:'' },
+        { id:'ex-a-2', activityDate:'2026-01-12', content:'활동', memo:'', photoName:'photo.jpg', photoUrl:'', hasCost:false, costAmount:0,     receiptName:'',           receiptUrl:'' },
+        { id:'ex-a-3', activityDate:'2026-01-19', content:'활동', memo:'', photoName:'photo.jpg', photoUrl:'', hasCost:false, costAmount:0,     receiptName:'',           receiptUrl:'' },
+      ],
+    },
+  },
+  {
+    label: '예시B',
+    desc: '비용 3회 합계 120,000원 → 한도 100,000원으로 상한 적용',
+    md: {
+      monthIndex: 3,
+      activities: [
+        { id:'ex-b-1', activityDate:'2026-01-05', content:'활동', memo:'', photoName:'photo.jpg', photoUrl:'', hasCost:true, costAmount:40000, receiptName:'receipt.jpg', receiptUrl:'' },
+        { id:'ex-b-2', activityDate:'2026-01-12', content:'활동', memo:'', photoName:'photo.jpg', photoUrl:'', hasCost:true, costAmount:40000, receiptName:'receipt.jpg', receiptUrl:'' },
+        { id:'ex-b-3', activityDate:'2026-01-19', content:'활동', memo:'', photoName:'photo.jpg', photoUrl:'', hasCost:true, costAmount:40000, receiptName:'receipt.jpg', receiptUrl:'' },
+      ],
+    },
+  },
+  {
+    label: '예시C',
+    desc: '사진+비용 1회(30,000원) + 사진만 1회 → 한도 50,000원',
+    md: {
+      monthIndex: 2,
+      activities: [
+        { id:'ex-c-1', activityDate:'2026-01-05', content:'활동', memo:'', photoName:'photo.jpg', photoUrl:'', hasCost:true,  costAmount:30000, receiptName:'receipt.jpg', receiptUrl:'' },
+        { id:'ex-c-2', activityDate:'2026-01-12', content:'활동', memo:'', photoName:'photo.jpg', photoUrl:'', hasCost:false, costAmount:0,     receiptName:'',           receiptUrl:'' },
+      ],
+    },
+  },
+  {
+    label: '예시D',
+    desc: '사진만 3회 (비용 없음) → 실사용 0원이므로 지급 0원',
+    md: {
+      monthIndex: 3,
+      activities: [
+        { id:'ex-d-1', activityDate:'2026-01-05', content:'활동', memo:'', photoName:'photo.jpg', photoUrl:'', hasCost:false, costAmount:0, receiptName:'', receiptUrl:'' },
+        { id:'ex-d-2', activityDate:'2026-01-12', content:'활동', memo:'', photoName:'photo.jpg', photoUrl:'', hasCost:false, costAmount:0, receiptName:'', receiptUrl:'' },
+        { id:'ex-d-3', activityDate:'2026-01-19', content:'활동', memo:'', photoName:'photo.jpg', photoUrl:'', hasCost:false, costAmount:0, receiptName:'', receiptUrl:'' },
+      ],
+    },
+  },
+  {
+    label: '예시E',
+    desc: '사진+비용 1회(30,000원) → 인정 1회로 한도 0원, 지급 0원',
+    md: {
+      monthIndex: 1,
+      activities: [
+        { id:'ex-e-1', activityDate:'2026-01-05', content:'활동', memo:'', photoName:'photo.jpg', photoUrl:'', hasCost:true, costAmount:30000, receiptName:'receipt.jpg', receiptUrl:'' },
+      ],
+    },
+  },
+]
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Login screen
@@ -842,6 +906,38 @@ export default function AdminDashboard() {
                         </tr>
                       )
                     })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* 계산 예시 (로직 검증용) */}
+            <div className="bg-amber-50 border border-amber-200 rounded-lg overflow-hidden">
+              <div className="px-4 py-3 border-b border-amber-200">
+                <span className="text-sm font-semibold text-amber-800">계산 예시 — 지급 로직 검증</span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-amber-100 text-amber-800">
+                      {['예시', '설명', '차수', '활동수', '지급인정', '실사용금액', '최대한도', '지급예상'].map(h => (
+                        <th key={h} className="px-4 py-2 text-left font-medium whitespace-nowrap">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-amber-100">
+                    {SETTLEMENT_EXAMPLES.map(({ label, desc, md }) => (
+                      <tr key={label} className="hover:bg-amber-100/50">
+                        <td className="px-4 py-2.5 font-semibold text-amber-900 whitespace-nowrap">{label}</td>
+                        <td className="px-4 py-2.5 text-amber-800">{desc}</td>
+                        <td className="px-4 py-2.5 whitespace-nowrap text-amber-800">{md.monthIndex}개월차</td>
+                        <td className="px-4 py-2.5 text-center text-amber-800">{countAllActivities(md)}</td>
+                        <td className="px-4 py-2.5 text-center font-medium text-amber-900">{countValidActivities(md)}</td>
+                        <td className="px-4 py-2.5 whitespace-nowrap text-amber-800">{fmtAmount(getMonthActualCost(md))}</td>
+                        <td className="px-4 py-2.5 whitespace-nowrap text-amber-800">{fmtAmount(getMonthPaymentLimit(md))}</td>
+                        <td className="px-4 py-2.5 font-bold whitespace-nowrap text-amber-900">{fmtAmount(getMonthlyPayment(md))}</td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
