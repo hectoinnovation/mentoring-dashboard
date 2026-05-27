@@ -3,7 +3,7 @@ import nodemailer from 'nodemailer'
 
 export async function POST(req: NextRequest) {
   try {
-    const { to, subject, text } = await req.json()
+    const { to, subject, text, html } = await req.json()
     if (!to || !subject) {
       return NextResponse.json({ error: 'to, subject 필수' }, { status: 400 })
     }
@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
       from: process.env.SMTP_FROM ?? process.env.SMTP_USER,
       to,
       subject,
-      text,
+      ...(html ? { html, text: text ?? '' } : { text: text ?? '' }),
     })
 
     return NextResponse.json({ ok: true })

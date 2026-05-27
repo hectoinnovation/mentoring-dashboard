@@ -11,6 +11,7 @@ import {
   getTotalExpectedPayment, fmtAmount,
   generateInitialGuideMailBody, generateEndMailBody,
   sendInitialGuideMail, sendEndMail,
+  getMentoringProgress,
 } from '@/lib/mentoring'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -528,7 +529,7 @@ export default function AdminDashboard() {
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 text-gray-600">
                     <tr>
-                      {['멘토', '멘티', '입사일', '활동기간', '진행월', '활동', '지급 인정', '지급(예상)', '상태', '업로드', '목표'].map(h => (
+                      {['멘토', '멘티', '입사일', '활동기간', '진행월', '활동', '지급 인정', '지급(예상)', '상태', '업로드', '진행현황'].map(h => (
                         <th key={h} className="px-4 py-2.5 text-left font-medium whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
@@ -564,9 +565,11 @@ export default function AdminDashboard() {
                               : <Chip label="정상" color="bg-green-100 text-green-600" />}
                           </td>
                           <td className="px-4 py-2.5">
-                            {r.goals.savedAt
-                              ? <Chip label="완료" color="bg-blue-100 text-blue-600" />
-                              : <Chip label="미작성" color="bg-gray-100 text-gray-400" />}
+                            <div className="flex flex-wrap gap-1">
+                              {getMentoringProgress(r).map((b, i) => (
+                                <Chip key={i} label={b.text} color={b.color} />
+                              ))}
+                            </div>
                           </td>
                         </tr>
                       )

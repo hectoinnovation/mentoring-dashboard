@@ -37,6 +37,11 @@ export interface MentoringGoals {
   savedAt:      string | null
 }
 
+export interface ProgressBadge {
+  text:  string
+  color: string  // Tailwind bg+text classes
+}
+
 export interface MentoringRecord {
   id:                 string
   mentorName:         string
@@ -186,6 +191,75 @@ export function fmtAmount(n: number): string {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// 진행현황 배지
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function getMentoringProgress(record: MentoringRecord): ProgressBadge[] {
+  if (record.status === 'suspended')
+    return [{ text: '중단', color: 'bg-yellow-100 text-yellow-700' }]
+
+  const ci = getCurrentMonthIndex(record)
+  if (ci === 0) return [{ text: '대기', color: 'bg-gray-100 text-gray-500' }]
+
+  // 기간 종료
+  if (ci === 4) {
+    const allComplete = record.months.every(m => countValidActivities(m) >= 1)
+    if (allComplete) return [{ text: '전체 완료', color: 'bg-blue-100 text-blue-700' }]
+    return record.months.map(m => {
+      const v = countValidActivities(m)
+      return v >= 1
+        ? { text: `${m.monthIndex}차 완료`,      color: 'bg-blue-100 text-blue-700' }
+        : { text: `${m.monthIndex}차 미제출 마감`, color: 'bg-red-100 text-red-600' }
+    })
+  }
+
+  // ci = 1, 2, 3
+  const completedNums: number[] = []
+  const unsubBadges: ProgressBadge[] = []
+
+  for (let mi = 1; mi <= 3; mi++) {
+    const md = record.months.find(m => m.monthIndex === mi)!
+    if (mi < ci) {
+      if (countValidActivities(md) >= 1) {
+        completedNums.push(mi)
+      } else {
+        const { end } = getMonthPeriod(record.startDate, mi)
+        const [y, mo] = end.split('-').map(Number)
+        const nm = mo === 12 ? 1 : mo + 1
+        const ny = mo === 12 ? y + 1 : y
+        const deadline = `${ny}-${String(nm).padStart(2, '0')}-02`
+        const overdue = TODAY >= deadline
+        unsubBadges.push({
+          text:  `${mi}차 미제출${overdue ? ' 마감' : ''}`,
+          color: overdue ? 'bg-red-100 text-red-600' : 'bg-gray-100 text-gray-500',
+        })
+      }
+    }
+  }
+
+  const currentMd      = record.months.find(m => m.monthIndex === ci)
+  const currentComplete = (currentMd ? countValidActivities(currentMd) : 0) >= 3
+
+  if (currentComplete) completedNums.push(ci)
+
+  if (completedNums.length === 3)
+    return [{ text: '전체 완료', color: 'bg-blue-100 text-blue-700' }]
+
+  const result: ProgressBadge[] = []
+  if (completedNums.length > 0) {
+    const label = completedNums.length === 1
+      ? `${completedNums[0]}차 완료`
+      : completedNums.map(n => String(n)).join('·') + '차 완료'
+    result.push({ text: label, color: 'bg-blue-100 text-blue-700' })
+  }
+  result.push(...unsubBadges)
+  if (!currentComplete)
+    result.push({ text: `${ci}차 진행중`, color: 'bg-green-100 text-green-700' })
+
+  return result
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 레코드 생성 헬퍼
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -215,7 +289,7 @@ export function generateToken(): string {
 export function generateInitialGuideMailBody(record: MentoringRecord, link: string): string {
   return `안녕하세요.
 
-인재협업팀 안소정입니다.
+인재협업팀입니다.
 
 ${record.mentorName}님께서는 신규입사자 ${record.menteeName}님의 멘토로 선정되셨습니다.
 멘토링 진행 부탁드리며, 아래 내용 확인 후 활동 부탁드립니다.
@@ -255,7 +329,8 @@ ${link}
 2. 해당 월 카드에서 [활동 추가] 버튼을 클릭합니다.
 3. 활동일, 활동 내용, 활동 사진을 등록합니다.
 4. 비용이 발생한 경우 '비용 사용 있음'을 체크하고 사용 금액을 입력한 후 영수증을 업로드합니다.
-5. 저장 버튼을 클릭합니다.
+5. [저장] 버튼을 클릭합니다.
+6. 등록된 활동은 목록에서 언제든지 확인·수정할 수 있습니다.
 
 ■ 월별 지급 기준 (매월 독립 정산)
 - 지급 인정 활동 0~1회: 지급 없음
@@ -269,18 +344,137 @@ ${link}
    사진은 식사 활동뿐 아니라 채움·틔움·배움 프로그램 참여 사진, 사내 구성원 소개 및 교류 활동,
    멘티 적응 지원 활동 등 멘토링 활동을 확인할 수 있는 내용이면 인정 가능합니다.
 
-※ 총 최대 지급 금액: 300,000원 (3개월 합산)
-
 감사합니다.`
 }
 
+export function generateInitialGuideMailHtml(record: MentoringRecord, link: string): string {
+  const period = fmtPeriodMonthly(record.startDate, record.endDate)
+  return `<!DOCTYPE html>
+<html lang="ko">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background:#f5f7fa;font-family:'Apple SD Gothic Neo',AppleGothic,'Malgun Gothic',sans-serif;color:#222;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f7fa;">
+<tr><td align="center" style="padding:40px 16px;">
+<table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.08);">
+
+<!-- 헤더 -->
+<tr><td style="background:#1e40af;padding:32px 40px;">
+  <p style="margin:0;font-size:13px;color:#bfdbfe;">인재협업팀</p>
+  <h1 style="margin:8px 0 0;font-size:22px;font-weight:700;color:#ffffff;">멘토 선정 및 멘토링 프로그램 안내</h1>
+</td></tr>
+
+<!-- 본문 -->
+<tr><td style="padding:36px 40px;">
+
+  <p style="margin:0 0 24px;font-size:15px;line-height:1.8;color:#374151;">
+    안녕하세요.<br>인재협업팀입니다.<br><br>
+    <strong>${record.mentorName}님</strong>께서는 신규입사자 <strong>${record.menteeName}님</strong>의 멘토로 선정되셨습니다.<br>
+    멘토링 진행 부탁드리며, 아래 내용 확인 후 활동 부탁드립니다.
+  </p>
+
+  <!-- 입사일 / 기간 -->
+  <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:12px;border-left:4px solid #3b82f6;background:#eff6ff;border-radius:0 8px 8px 0;">
+    <tr><td style="padding:14px 18px;">
+      <p style="margin:0 0 2px;font-size:11px;font-weight:700;color:#1e40af;letter-spacing:0.5px;">입사일</p>
+      <p style="margin:0;font-size:15px;font-weight:600;color:#1e3a8a;">${record.joinDate}</p>
+    </td></tr>
+  </table>
+  <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:28px;border-left:4px solid #3b82f6;background:#eff6ff;border-radius:0 8px 8px 0;">
+    <tr><td style="padding:14px 18px;">
+      <p style="margin:0 0 2px;font-size:11px;font-weight:700;color:#1e40af;letter-spacing:0.5px;">멘토링 활동 기간</p>
+      <p style="margin:0;font-size:15px;font-weight:600;color:#1e3a8a;">${period} (총 3개월)</p>
+    </td></tr>
+  </table>
+
+  <!-- 멘토 역할 -->
+  <h2 style="margin:0 0 14px;font-size:15px;font-weight:700;color:#1e3a8a;border-bottom:2px solid #dbeafe;padding-bottom:8px;">■ 멘토 역할</h2>
+  <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
+    <tr><td style="padding:0 0 12px;">
+      <p style="margin:0 0 3px;font-size:14px;font-weight:600;color:#374151;">1) 신규입사자 입사 당일 에스코트</p>
+      <p style="margin:0 0 0 12px;font-size:13px;color:#6b7280;">(OJT 및 근로계약서 작성 후 인사팀에서 개별 안내 예정)</p>
+    </td></tr>
+    <tr><td style="padding:0 0 12px;">
+      <p style="margin:0 0 6px;font-size:14px;font-weight:600;color:#374151;">2) 입사일 PC 설명 및 세팅 안내</p>
+      <p style="margin:0 0 6px 12px;font-size:13px;color:#6b7280;">(네이버웍스, NAC, FTC, 클라우디움, 복호화 등)</p>
+      <table cellpadding="0" cellspacing="0" style="margin-left:12px;background:#fffbeb;border:1px solid #fcd34d;border-radius:6px;">
+        <tr><td style="padding:10px 14px;font-size:13px;color:#92400e;">
+          💡 초기 비밀번호: <strong>hecto12!@</strong><br>
+          <span style="font-size:12px;color:#a16207;">업무망/인터넷망 비밀번호 각각 별도 설정 필요 · 클라우디움 비밀번호는 아이디/비밀번호 동일</span>
+        </td></tr>
+      </table>
+    </td></tr>
+    <tr><td style="padding:0 0 10px;"><p style="margin:0;font-size:14px;font-weight:600;color:#374151;">3) 멘티와 교류가 필요한 인원 선정 및 멘토링 활동 초대</p></td></tr>
+    <tr><td style="padding:0 0 10px;"><p style="margin:0;font-size:14px;font-weight:600;color:#374151;">4) 조직의 목표, 방침, 기능, 커뮤니케이션 채널, 육성 프로그램 및 회사 내·외부 자원 정보 공유</p></td></tr>
+    <tr><td><p style="margin:0;font-size:14px;font-weight:600;color:#374151;">5) 기타 멘티의 업무 수행 및 조직 적응에 필요한 제반 지원</p></td></tr>
+  </table>
+
+  <!-- 대시보드 버튼 -->
+  <h2 style="margin:0 0 12px;font-size:15px;font-weight:700;color:#1e3a8a;border-bottom:2px solid #dbeafe;padding-bottom:8px;">■ 멘토 대시보드</h2>
+  <p style="margin:0 0 16px;font-size:14px;color:#374151;">활동 사진 및 증빙은 아래 버튼을 클릭하여 멘토링 대시보드에 업로드해 주세요.</p>
+  <table cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
+    <tr><td style="border-radius:8px;background:#2563eb;">
+      <a href="${link}" style="display:inline-block;background:#2563eb;color:#ffffff;padding:16px 36px;border-radius:8px;font-size:16px;font-weight:700;text-decoration:none;letter-spacing:0.3px;">멘토링 대시보드 바로가기 →</a>
+    </td></tr>
+  </table>
+
+  <!-- 활동 등록 방법 -->
+  <h2 style="margin:0 0 14px;font-size:15px;font-weight:700;color:#1e3a8a;border-bottom:2px solid #dbeafe;padding-bottom:8px;">■ 활동 등록 방법</h2>
+  <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:28px;">
+    <tr><td style="padding:5px 0;"><table cellpadding="0" cellspacing="0"><tr><td style="width:26px;height:26px;background:#2563eb;border-radius:50%;text-align:center;vertical-align:middle;font-size:12px;font-weight:700;color:#fff;">1</td><td style="padding-left:10px;font-size:14px;color:#374151;">위 버튼을 클릭하여 멘토링 대시보드에 접속합니다.</td></tr></table></td></tr>
+    <tr><td style="padding:5px 0;"><table cellpadding="0" cellspacing="0"><tr><td style="width:26px;height:26px;background:#2563eb;border-radius:50%;text-align:center;vertical-align:middle;font-size:12px;font-weight:700;color:#fff;">2</td><td style="padding-left:10px;font-size:14px;color:#374151;">해당 월 카드에서 [활동 추가] 버튼을 클릭합니다.</td></tr></table></td></tr>
+    <tr><td style="padding:5px 0;"><table cellpadding="0" cellspacing="0"><tr><td style="width:26px;height:26px;background:#2563eb;border-radius:50%;text-align:center;vertical-align:middle;font-size:12px;font-weight:700;color:#fff;">3</td><td style="padding-left:10px;font-size:14px;color:#374151;">활동일, 활동 내용, 활동 사진을 등록합니다.</td></tr></table></td></tr>
+    <tr><td style="padding:5px 0;"><table cellpadding="0" cellspacing="0"><tr><td style="width:26px;height:26px;background:#2563eb;border-radius:50%;text-align:center;vertical-align:middle;font-size:12px;font-weight:700;color:#fff;">4</td><td style="padding-left:10px;font-size:14px;color:#374151;">비용 발생 시 '비용 사용 있음' 체크 → 사용 금액 입력 → 영수증 업로드.</td></tr></table></td></tr>
+    <tr><td style="padding:5px 0;"><table cellpadding="0" cellspacing="0"><tr><td style="width:26px;height:26px;background:#2563eb;border-radius:50%;text-align:center;vertical-align:middle;font-size:12px;font-weight:700;color:#fff;">5</td><td style="padding-left:10px;font-size:14px;color:#374151;">[저장] 버튼을 클릭합니다.</td></tr></table></td></tr>
+    <tr><td style="padding:5px 0;"><table cellpadding="0" cellspacing="0"><tr><td style="width:26px;height:26px;background:#2563eb;border-radius:50%;text-align:center;vertical-align:middle;font-size:12px;font-weight:700;color:#fff;">6</td><td style="padding-left:10px;font-size:14px;color:#374151;">등록된 활동은 목록에서 언제든지 확인·수정할 수 있습니다.</td></tr></table></td></tr>
+  </table>
+
+  <!-- 지급 기준 -->
+  <h2 style="margin:0 0 14px;font-size:15px;font-weight:700;color:#1e3a8a;border-bottom:2px solid #dbeafe;padding-bottom:8px;">■ 월별 지급 기준 (매월 독립 정산)</h2>
+  <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:12px;border:2px solid #dc2626;border-radius:10px;overflow:hidden;border-collapse:separate;border-spacing:0;">
+    <tr style="background:#dc2626;">
+      <th style="padding:10px 16px;font-size:13px;color:#fff;text-align:center;font-weight:700;width:50%;">인정 활동 횟수</th>
+      <th style="padding:10px 16px;font-size:13px;color:#fff;text-align:center;font-weight:700;width:50%;">지급 한도</th>
+    </tr>
+    <tr style="background:#fef2f2;">
+      <td style="padding:10px 16px;font-size:14px;color:#374151;text-align:center;border-top:1px solid #fecaca;">0 ~ 1회</td>
+      <td style="padding:10px 16px;font-size:14px;color:#dc2626;font-weight:600;text-align:center;border-top:1px solid #fecaca;">지급 없음</td>
+    </tr>
+    <tr style="background:#fff7f7;">
+      <td style="padding:10px 16px;font-size:14px;color:#374151;text-align:center;border-top:1px solid #fecaca;">2회</td>
+      <td style="padding:10px 16px;font-size:14px;color:#dc2626;font-weight:600;text-align:center;border-top:1px solid #fecaca;">최대 50,000원</td>
+    </tr>
+    <tr style="background:#fef2f2;">
+      <td style="padding:10px 16px;font-size:14px;color:#374151;text-align:center;border-top:1px solid #fecaca;">3회 이상</td>
+      <td style="padding:10px 16px;font-size:14px;color:#dc2626;font-weight:600;text-align:center;border-top:1px solid #fecaca;">최대 100,000원</td>
+    </tr>
+  </table>
+  <p style="margin:0 0 6px;font-size:13px;color:#6b7280;">※ 실제 사용금액이 한도보다 적은 경우 실제 금액 기준 지급</p>
+  <p style="margin:0 0 6px;font-size:13px;color:#6b7280;">※ 활동 사진 등록 시 인정 · 비용 없는 활동도 인정 가능 · 비용 있는 경우 영수증+금액 입력 필수</p>
+  <p style="margin:0 0 28px;font-size:13px;color:#6b7280;">※ 사진은 식사, 채움·틔움·배움 프로그램, 사내 교류 활동 등 멘토링 활동 확인 가능 내용이면 인정</p>
+
+  <p style="margin:0;font-size:14px;color:#374151;">감사합니다.<br><strong>인재협업팀</strong></p>
+</td></tr>
+
+<!-- 푸터 -->
+<tr><td style="background:#f1f5f9;padding:18px 40px;text-align:center;">
+  <p style="margin:0;font-size:12px;color:#94a3b8;">본 메일은 발신 전용입니다. 문의사항은 인재협업팀으로 연락해 주세요.</p>
+</td></tr>
+
+</table>
+</td></tr>
+</table>
+</body>
+</html>`
+}
+
 export function generateEndMailBody(record: MentoringRecord): string {
-  return `${record.mentorName}님, ${record.menteeName}님
+  return `안녕하세요.
+인재협업팀입니다.
+
+${record.mentorName}님, ${record.menteeName}님
+
 이번 달 멘토링 활동 마감일이 다가와 활동 등록 및 증빙 자료 업로드를 안내드립니다.
-
 활동 등록 및 증빙 자료 업로드가 완료되지 않은 경우 지급 인정이 어려울 수 있으니 기간 내 등록 부탁드립니다.
-
-인재협업팀 안소정입니다.
 
 ■ 활동 등록 마감 안내
 
@@ -320,6 +514,106 @@ export function generateEndMailBody(record: MentoringRecord): string {
 감사합니다.`
 }
 
+export function generateEndMailHtml(record: MentoringRecord): string {
+  return `<!DOCTYPE html>
+<html lang="ko">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background:#f5f7fa;font-family:'Apple SD Gothic Neo',AppleGothic,'Malgun Gothic',sans-serif;color:#222;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f7fa;">
+<tr><td align="center" style="padding:40px 16px;">
+<table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.08);">
+
+<!-- 헤더 -->
+<tr><td style="background:#7c3aed;padding:32px 40px;">
+  <p style="margin:0;font-size:13px;color:#ddd6fe;">인재협업팀</p>
+  <h1 style="margin:8px 0 0;font-size:22px;font-weight:700;color:#ffffff;">멘토링 활동 등록 및 증빙 자료 제출 안내</h1>
+</td></tr>
+
+<!-- 본문 -->
+<tr><td style="padding:36px 40px;">
+
+  <p style="margin:0 0 24px;font-size:15px;line-height:1.8;color:#374151;">
+    안녕하세요.<br>인재협업팀입니다.<br><br>
+    <strong>${record.mentorName}님</strong>, <strong>${record.menteeName}님</strong><br>
+    이번 달 멘토링 활동 마감일이 다가와 활동 등록 및 증빙 자료 업로드를 안내드립니다.<br>
+    기간 내 미등록 건은 지급 인정이 어려울 수 있으니 기간 내 등록 부탁드립니다.
+  </p>
+
+  <!-- 마감 안내 (빨간 카드) -->
+  <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px;border:2px solid #dc2626;border-radius:10px;background:#fef2f2;overflow:hidden;">
+    <tr><td style="background:#dc2626;padding:10px 18px;">
+      <p style="margin:0;font-size:14px;font-weight:700;color:#ffffff;">🚨 활동 등록 마감 안내</p>
+    </td></tr>
+    <tr><td style="padding:16px 18px;">
+      <p style="margin:0 0 6px;font-size:14px;font-weight:600;color:#dc2626;">매월 1일 14:00까지 등록 완료 부탁드립니다.</p>
+      <p style="margin:0;font-size:13px;color:#6b7280;">1일이 공휴일 또는 빨간날인 경우 다음 영업일 14:00까지 등록 부탁드립니다.</p>
+    </td></tr>
+  </table>
+
+  <!-- 지급 기준 (빨간 테이블 카드) -->
+  <h2 style="margin:0 0 14px;font-size:15px;font-weight:700;color:#1e3a8a;border-bottom:2px solid #dbeafe;padding-bottom:8px;">■ 지급 기준</h2>
+  <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:10px;border:2px solid #dc2626;border-radius:10px;overflow:hidden;border-collapse:separate;border-spacing:0;">
+    <tr style="background:#dc2626;">
+      <th style="padding:10px 16px;font-size:13px;color:#fff;text-align:center;font-weight:700;width:50%;">인정 활동 횟수</th>
+      <th style="padding:10px 16px;font-size:13px;color:#fff;text-align:center;font-weight:700;width:50%;">지급 한도</th>
+    </tr>
+    <tr style="background:#fef2f2;">
+      <td style="padding:10px 16px;font-size:14px;color:#374151;text-align:center;border-top:1px solid #fecaca;">0 ~ 1회</td>
+      <td style="padding:10px 16px;font-size:14px;color:#dc2626;font-weight:600;text-align:center;border-top:1px solid #fecaca;">지급 없음</td>
+    </tr>
+    <tr style="background:#fff7f7;">
+      <td style="padding:10px 16px;font-size:14px;color:#374151;text-align:center;border-top:1px solid #fecaca;">2회</td>
+      <td style="padding:10px 16px;font-size:14px;color:#dc2626;font-weight:600;text-align:center;border-top:1px solid #fecaca;">최대 50,000원</td>
+    </tr>
+    <tr style="background:#fef2f2;">
+      <td style="padding:10px 16px;font-size:14px;color:#374151;text-align:center;border-top:1px solid #fecaca;">3회 이상</td>
+      <td style="padding:10px 16px;font-size:14px;color:#dc2626;font-weight:600;text-align:center;border-top:1px solid #fecaca;">최대 100,000원</td>
+    </tr>
+  </table>
+  <p style="margin:0 0 24px;font-size:13px;color:#6b7280;">※ 실제 사용금액이 한도보다 적은 경우 실제 금액 기준 지급 (예: 사용 96,000원 → 지급 96,000원)</p>
+
+  <!-- 증빙 등록 안내 -->
+  <h2 style="margin:0 0 14px;font-size:15px;font-weight:700;color:#1e3a8a;border-bottom:2px solid #dbeafe;padding-bottom:8px;">■ 증빙 등록 안내</h2>
+  <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px;">
+    <tr><td style="padding:4px 0;font-size:14px;color:#374151;">· 활동 사진 등록 시 활동 인정 가능합니다.</td></tr>
+    <tr><td style="padding:4px 0;font-size:14px;color:#374151;">· 비용 사용이 없는 활동도 인정 가능합니다.</td></tr>
+    <tr><td style="padding:4px 0;font-size:14px;color:#374151;">· 비용 사용이 있는 경우 영수증 업로드와 사용 금액 입력이 필요합니다.</td></tr>
+    <tr><td style="padding:4px 0;font-size:14px;color:#dc2626;font-weight:600;">· 기간 내 미등록 건은 지급 인정이 어려울 수 있습니다.</td></tr>
+  </table>
+  <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px;background:#faf5ff;border-left:4px solid #7c3aed;border-radius:0 8px 8px 0;">
+    <tr><td style="padding:14px 18px;font-size:13px;color:#5b21b6;line-height:1.7;">
+      사진 인정 범위: 식사 활동, 채움·틔움·배움 프로그램 참여, 사내 구성원 소개 및 교류 활동,<br>
+      멘티 적응 지원 활동 등 멘토링 활동을 확인할 수 있는 내용이면 인정 가능합니다.
+    </td></tr>
+  </table>
+
+  <!-- 지급 일정 (주황 카드) -->
+  <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:28px;border:2px solid #f97316;border-radius:10px;background:#fff7ed;overflow:hidden;">
+    <tr><td style="background:#f97316;padding:10px 18px;">
+      <p style="margin:0;font-size:14px;font-weight:700;color:#ffffff;">📅 활동비 지급 일정</p>
+    </td></tr>
+    <tr><td style="padding:16px 18px;">
+      <p style="margin:0 0 6px;font-size:14px;font-weight:600;color:#c2410c;">사용월 기준 익월 10일 지급 예정</p>
+      <p style="margin:0 0 4px;font-size:13px;color:#6b7280;">예: 5월 활동비 → 6월 10일 지급</p>
+      <p style="margin:0;font-size:13px;color:#6b7280;">단, 공휴일 또는 휴무일 포함 시 지급일 전후로 변동될 수 있습니다.</p>
+    </td></tr>
+  </table>
+
+  <p style="margin:0;font-size:14px;color:#374151;">감사합니다.<br><strong>인재협업팀</strong></p>
+</td></tr>
+
+<!-- 푸터 -->
+<tr><td style="background:#f1f5f9;padding:18px 40px;text-align:center;">
+  <p style="margin:0;font-size:12px;color:#94a3b8;">본 메일은 발신 전용입니다. 문의사항은 인재협업팀으로 연락해 주세요.</p>
+</td></tr>
+
+</table>
+</td></tr>
+</table>
+</body>
+</html>`
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // 메일 발송 API 스텁
 // ─────────────────────────────────────────────────────────────────────────────
@@ -327,20 +621,28 @@ export function generateEndMailBody(record: MentoringRecord): string {
 export async function sendInitialGuideMail(record: MentoringRecord): Promise<void> {
   const origin = typeof window !== 'undefined' ? window.location.origin : ''
   const link   = `${origin}/mentor/${record.token}`
-  const text   = generateInitialGuideMailBody(record, link)
   await fetch('/api/send-mail', {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({ to: record.mentorEmail, subject: '신규입사자 멘토링 안내', text }),
+    body:    JSON.stringify({
+      to:      record.mentorEmail,
+      subject: '멘토 선정 및 멘토링 프로그램 안내',
+      text:    generateInitialGuideMailBody(record, link),
+      html:    generateInitialGuideMailHtml(record, link),
+    }),
   }).catch(err => console.warn('[sendInitialGuideMail]', err))
 }
 
 export async function sendEndMail(record: MentoringRecord): Promise<void> {
-  const text = generateEndMailBody(record)
   await fetch('/api/send-mail', {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({ to: record.mentorEmail, subject: '멘토링 종료 안내', text }),
+    body:    JSON.stringify({
+      to:      record.mentorEmail,
+      subject: '멘토링 활동 등록 및 증빙 자료 제출 안내',
+      text:    generateEndMailBody(record),
+      html:    generateEndMailHtml(record),
+    }),
   }).catch(err => console.warn('[sendEndMail]', err))
 }
 
