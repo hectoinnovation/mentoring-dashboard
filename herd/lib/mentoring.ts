@@ -337,11 +337,18 @@ ${link}
 - 지급 인정 활동 2회: 최대 50,000원
 - 지급 인정 활동 3회 이상: 최대 100,000원
 
+※ 멘토링 활동비는 지급 기준 금액과 실제 사용금액을 비교하여 더 낮은 금액으로 지급됩니다.
+
+예)
+- 활동 3회 + 실제 사용금액 96,000원 → 96,000원 지급
+- 활동 3회 + 실제 사용금액 30,000원 → 30,000원 지급
+- 활동 3회 + 비용 사용 없음 → 지급 없음
+
 ※ 멘토링 활동은 활동 사진 등록 시 인정됩니다.
    비용 사용이 없는 활동도 인정 가능합니다.
    단, 비용 사용이 있는 경우에는 영수증 업로드와 사용 금액 입력이 필요합니다.
 
-   사진은 식사 활동뿐 아니라 채움·틔움·배움 프로그램 참여 사진, 사내 구성원 소개 및 교류 활동,
+   사진은 식사 활동뿐 아니라 채움·틔움·배움 공간(회사 식당·카페·도서관) 이용, 사내 구성원 소개 및 교류 활동,
    신규입사자 적응 지원 활동 등 멘토링 활동을 확인할 수 있는 내용이면 인정 가능합니다.
 
 감사합니다.
@@ -449,9 +456,18 @@ export function generateInitialGuideMailHtml(record: MentoringRecord, link: stri
       <td style="padding:10px 16px;font-size:14px;color:#dc2626;font-weight:600;text-align:center;border-top:1px solid #fecaca;">최대 100,000원</td>
     </tr>
   </table>
-  <p style="margin:0 0 6px;font-size:13px;color:#6b7280;">※ 실제 사용금액이 한도보다 적은 경우 실제 금액 기준 지급</p>
+  <!-- 오해방지 문구 -->
+  <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:12px;background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;">
+    <tr><td style="padding:14px 18px;">
+      <p style="margin:0 0 8px;font-size:13px;font-weight:700;color:#92400e;">※ 멘토링 활동비는 지급 기준 금액과 실제 사용금액을 비교하여 더 낮은 금액으로 지급됩니다.</p>
+      <p style="margin:0 0 4px;font-size:13px;color:#92400e;font-weight:600;">예)</p>
+      <p style="margin:0 0 2px;font-size:13px;color:#92400e;">· 활동 3회 + 실제 사용금액 96,000원 → 96,000원 지급</p>
+      <p style="margin:0 0 2px;font-size:13px;color:#92400e;">· 활동 3회 + 실제 사용금액 30,000원 → 30,000원 지급</p>
+      <p style="margin:0;font-size:13px;color:#92400e;">· 활동 3회 + 비용 사용 없음 → 지급 없음</p>
+    </td></tr>
+  </table>
   <p style="margin:0 0 6px;font-size:13px;color:#6b7280;">※ 활동 사진 등록 시 인정 · 비용 없는 활동도 인정 가능 · 비용 있는 경우 영수증+금액 입력 필수</p>
-  <p style="margin:0 0 28px;font-size:13px;color:#6b7280;">※ 사진은 식사, 채움·틔움·배움 프로그램, 사내 교류 활동 등 멘토링 활동 확인 가능 내용이면 인정</p>
+  <p style="margin:0 0 28px;font-size:13px;color:#6b7280;">※ 사진은 식사 활동뿐 아니라 채움·틔움·배움 공간(회사 식당·카페·도서관) 이용, 사내 구성원 소개 및 교류 활동, 신규입사자 적응 지원 활동 등 멘토링 활동 확인 가능 내용이면 인정</p>
 
   <p style="margin:0;font-size:14px;color:#374151;">감사합니다.<br><strong>인재협업팀 드림</strong></p>
 </td></tr>
@@ -487,8 +503,12 @@ export function generateEndMailBody(record: MentoringRecord): string {
 - 2회: 최대 50,000원
 - 3회 이상: 최대 100,000원
 
-단, 실제 사용금액이 지급 기준보다 적은 경우 실제 사용금액 기준으로 지급됩니다.
-예: 실제 사용금액 96,000원 → 지급금액 96,000원
+※ 멘토링 활동비는 지급 기준 금액과 실제 사용금액을 비교하여 더 낮은 금액으로 지급됩니다.
+
+예)
+- 활동 3회 + 실제 사용금액 96,000원 → 96,000원 지급
+- 활동 3회 + 실제 사용금액 30,000원 → 30,000원 지급
+- 활동 3회 + 비용 사용 없음 → 지급 없음
 
 ■ 증빙 등록 안내
 
@@ -497,7 +517,7 @@ export function generateEndMailBody(record: MentoringRecord): string {
 - 비용 사용이 있는 경우 영수증 업로드와 사용 금액 입력이 필요합니다.
 - 기간 내 미등록 건은 지급 인정이 어려울 수 있습니다.
 
-사진은 식사 활동뿐 아니라 채움·틔움·배움 프로그램 참여 사진, 사내 구성원 소개 및 교류 활동,
+사진은 식사 활동뿐 아니라 채움·틔움·배움 공간(회사 식당·카페·도서관) 이용, 사내 구성원 소개 및 교류 활동,
 신규입사자 적응 지원 활동 등 멘토링 활동을 확인할 수 있는 내용이면 인정 가능합니다.
 
 ■ 활동비 지급 일정
@@ -566,7 +586,16 @@ export function generateEndMailHtml(record: MentoringRecord): string {
       <td style="padding:10px 16px;font-size:14px;color:#dc2626;font-weight:600;text-align:center;border-top:1px solid #fecaca;">최대 100,000원</td>
     </tr>
   </table>
-  <p style="margin:0 0 24px;font-size:13px;color:#6b7280;">※ 실제 사용금액이 한도보다 적은 경우 실제 금액 기준 지급 (예: 사용 96,000원 → 지급 96,000원)</p>
+  <!-- 오해방지 문구 -->
+  <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px;background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;">
+    <tr><td style="padding:14px 18px;">
+      <p style="margin:0 0 8px;font-size:13px;font-weight:700;color:#92400e;">※ 멘토링 활동비는 지급 기준 금액과 실제 사용금액을 비교하여 더 낮은 금액으로 지급됩니다.</p>
+      <p style="margin:0 0 4px;font-size:13px;color:#92400e;font-weight:600;">예)</p>
+      <p style="margin:0 0 2px;font-size:13px;color:#92400e;">· 활동 3회 + 실제 사용금액 96,000원 → 96,000원 지급</p>
+      <p style="margin:0 0 2px;font-size:13px;color:#92400e;">· 활동 3회 + 실제 사용금액 30,000원 → 30,000원 지급</p>
+      <p style="margin:0;font-size:13px;color:#92400e;">· 활동 3회 + 비용 사용 없음 → 지급 없음</p>
+    </td></tr>
+  </table>
 
   <!-- 증빙 등록 안내 -->
   <h2 style="margin:0 0 14px;font-size:15px;font-weight:700;color:#1e3a8a;border-bottom:2px solid #dbeafe;padding-bottom:8px;">■ 증빙 등록 안내</h2>
@@ -578,7 +607,7 @@ export function generateEndMailHtml(record: MentoringRecord): string {
   </table>
   <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px;background:#faf5ff;border-left:4px solid #7c3aed;border-radius:0 8px 8px 0;">
     <tr><td style="padding:14px 18px;font-size:13px;color:#5b21b6;line-height:1.7;">
-      사진 인정 범위: 식사 활동, 채움·틔움·배움 프로그램 참여, 사내 구성원 소개 및 교류 활동,<br>
+      사진 인정 범위: 식사 활동, 채움·틔움·배움 공간(회사 식당·카페·도서관) 이용, 사내 구성원 소개 및 교류 활동,<br>
       신규입사자 적응 지원 활동 등 멘토링 활동을 확인할 수 있는 내용이면 인정 가능합니다.
     </td></tr>
   </table>

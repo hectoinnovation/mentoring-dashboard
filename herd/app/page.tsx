@@ -9,7 +9,7 @@ import {
   countValidActivities, countAllActivities,
   getMonthlyPayment, getMonthActualCost, getMonthPaymentLimit,
   getTotalExpectedPayment, fmtAmount,
-  generateInitialGuideMailBody, generateEndMailBody,
+  generateInitialGuideMailHtml, generateEndMailHtml,
   sendInitialGuideMail, sendEndMail,
   getMentoringProgress,
 } from '@/lib/mentoring'
@@ -339,15 +339,16 @@ export default function AdminDashboard() {
   // Mail
   // ─────────────────────────────────────────────────────────────────────────
 
-  const mailPreviewBody = useMemo(() => {
+  const mailPreviewHtml = useMemo(() => {
     if (!mailPreviewRecord) return ''
     const link = typeof window !== 'undefined'
       ? `${window.location.origin}/mentor/${mailPreviewRecord.token}`
-      : '[링크]'
+      : `https://mentoring-dashboard-lilac.vercel.app/mentor/${mailPreviewRecord.token}`
     return mailPreviewType === 'initial'
-      ? generateInitialGuideMailBody(mailPreviewRecord, link)
-      : generateEndMailBody(mailPreviewRecord)
+      ? generateInitialGuideMailHtml(mailPreviewRecord, link)
+      : generateEndMailHtml(mailPreviewRecord)
   }, [mailPreviewRecord, mailPreviewType])
+
 
   async function handleSendMail() {
     if (!mailPreviewRecord) return
@@ -1069,10 +1070,11 @@ export default function AdminDashboard() {
               </div>
               <button onClick={() => setMailPreviewRecord(null)} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">×</button>
             </div>
-            <div className="px-6 py-4">
-              <pre className="bg-gray-50 border border-gray-100 rounded-lg p-4 text-sm text-gray-700 whitespace-pre-wrap font-sans max-h-96 overflow-y-auto leading-relaxed">
-                {mailPreviewBody}
-              </pre>
+            <div className="px-4 py-4 max-h-[70vh] overflow-y-auto border border-gray-100 rounded-lg mx-6 bg-gray-50">
+              <div
+                dangerouslySetInnerHTML={{ __html: mailPreviewHtml }}
+                style={{ fontSize: '14px', lineHeight: '1.6' }}
+              />
             </div>
             <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-2">
               <button onClick={() => setMailPreviewRecord(null)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">닫기</button>
