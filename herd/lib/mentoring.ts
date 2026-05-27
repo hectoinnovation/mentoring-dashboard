@@ -21,6 +21,7 @@ export interface ActivityEntry {
   photoName:    string
   photoUrl:     string
   hasCost:      boolean  // 비용 사용 여부
+  costAmount:   number   // 실제 사용 금액 (hasCost=true일 때 필수, >0)
   receiptName:  string
   receiptUrl:   string
 }
@@ -41,7 +42,8 @@ export interface MentoringRecord {
   mentorName:         string
   mentorEmail:        string   // 필수
   menteeName:         string
-  joinMonth:          string   // YYYY-MM (입사월)
+  joinDate:           string   // YYYY-MM-DD (입사일, 일 단위)
+  joinMonth:          string   // YYYY-MM (입사월, 3개월 기간 계산용)
   startDate:          string   // joinMonth 첫째 날 (자동 계산)
   endDate:            string   // joinMonth+2 마지막 날 (자동 계산)
   status:             MentoringStatus
@@ -113,14 +115,21 @@ export function getMonthDataForYM(record: MentoringRecord, ym: string): MonthDat
   return null
 }
 
+/** 기간을 월 단위로 표시: "2026년 05월 ~ 2026년 07월" */
+export function fmtPeriodMonthly(startDate: string, endDate: string): string {
+  const sy = startDate.slice(0, 4)
+  const sm = startDate.slice(5, 7)
+  const ey = endDate.slice(0, 4)
+  const em = endDate.slice(5, 7)
+  return `${sy}년 ${sm}월 ~ ${ey}년 ${em}월`
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
-// 활동 인정 기준 (수정됨)
-// ─────────────────────────────────────────────────────────────────────────────
+// 활동 인정 기준
 //
-//  사진 있음 + 비용 없음          → 인정
-//  사진 있음 + 비용 있음 + 영수증  → 인정
-//  사진 있음 + 비용 있음 + 영수증X → 미인정
-//  사진 없음                      → 미인정
+//  사진 있음 + 비용 없음                             → 인정 (사용금액 합계 미포함)
+//  사진 있음 + 비용 있음 + 영수증 있음 + 금액 > 0    → 인정 (사용금액 합계 포함)
+//  그 외 (사진 없음 / 영수증 없음 / 금액 0·미입력)   → 미인정
 //
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -129,7 +138,7 @@ export function countValidActivities(monthData: MonthData): number {
   return monthData.activities.filter(a => {
     if (!a.photoName) return false
     if (!a.hasCost)   return true
-    return !!a.receiptName
+    return !!a.receiptName && a.costAmount > 0
   }).length
 }
 
@@ -138,12 +147,32 @@ export function countAllActivities(monthData: MonthData): number {
   return monthData.activities.length
 }
 
-/** 월별 지급액 (유효 활동 기준) */
-export function getMonthlyPayment(monthData: MonthData): number {
+/** 실제 사용금액 합계 (유효 활동 중 비용 있는 것만) */
+export function getMonthActualCost(monthData: MonthData): number {
+  return monthData.activities
+    .filter(a => {
+      if (!a.photoName || !a.hasCost) return false
+      return !!a.receiptName && a.costAmount > 0
+    })
+    .reduce((sum, a) => sum + a.costAmount, 0)
+}
+
+/** 유효 활동 횟수 기준 지급 한도 */
+export function getMonthPaymentLimit(monthData: MonthData): number {
   const n = countValidActivities(monthData)
   if (n >= 3) return 100_000
   if (n === 2) return  50_000
   return 0
+}
+
+/**
+ * 월별 지급금액 = min(유효활동 기준 지급한도, 실제 사용금액 합계)
+ * - 비용 없는 활동만 있으면 사용금액=0 → 지급금액=0
+ */
+export function getMonthlyPayment(monthData: MonthData): number {
+  const limit = getMonthPaymentLimit(monthData)
+  if (limit === 0) return 0
+  return Math.min(limit, getMonthActualCost(monthData))
 }
 
 /** 전체 예상 지급액 (3개월 합산) */
@@ -184,8 +213,6 @@ export function generateToken(): string {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function generateInitialGuideMailBody(record: MentoringRecord, link: string): string {
-  const p1 = getMonthPeriod(record.startDate, 1)
-  const p3 = getMonthPeriod(record.startDate, 3)
   return `안녕하세요.
 
 인재협업팀 안소정입니다.
@@ -193,8 +220,30 @@ export function generateInitialGuideMailBody(record: MentoringRecord, link: stri
 ${record.mentorName}님께서는 신규입사자 ${record.menteeName}님의 멘토로 선정되셨습니다.
 멘토링 진행 부탁드리며, 아래 내용 확인 후 활동 부탁드립니다.
 
-■ 멘토링 기간
-${p1.start} ~ ${p3.end} (총 3개월)
+■ 입사일
+${record.joinDate}
+
+■ 멘토링 활동 기간
+${fmtPeriodMonthly(record.startDate, record.endDate)} (총 3개월)
+
+■ 멘토 역할
+
+1) 신규입사자 입사 당일 에스코트
+   (OJT 및 근로계약서 작성 후 인사팀에서 개별 안내 예정)
+
+2) 입사일 PC 설명 및 세팅 안내
+   (네이버웍스, NAC, FTC, 클라우디움, 복호화 등)
+
+   > 초기 비밀번호는 hecto12!@ 입니다.
+
+   - 업무망 / 인터넷망 비밀번호는 각각 별도 설정 필요
+   - 클라우디움 비밀번호는 아이디 / 비밀번호 동일
+
+3) 멘티와 교류가 필요한 인원을 선정하고 멘토링 활동에 초대
+
+4) 조직의 목표, 방침, 기능, 커뮤니케이션 채널, 육성 프로그램 및 회사 내·외부 이용 가능 자원에 대한 정보 공유
+
+5) 기타 멘티의 업무 수행 및 조직 적응에 필요한 제반 지원
 
 ■ 멘토 대시보드 링크
 ${link}
@@ -205,17 +254,23 @@ ${link}
 1. 위 링크로 접속합니다.
 2. 해당 월 카드에서 [활동 추가] 버튼을 클릭합니다.
 3. 활동일, 활동 내용, 활동 사진을 등록합니다.
-4. 비용이 발생한 경우 '비용 사용 있음'을 체크하고 영수증을 업로드합니다.
+4. 비용이 발생한 경우 '비용 사용 있음'을 체크하고 사용 금액을 입력한 후 영수증을 업로드합니다.
 5. 저장 버튼을 클릭합니다.
 
 ■ 월별 지급 기준 (매월 독립 정산)
 - 0~1회 인정: 0원
-- 2회 인정: 50,000원
-- 3회 이상 인정: 100,000원 (월 최대)
+- 2회 인정: 50,000원 한도
+- 3회 이상 인정: 100,000원 한도
+
+※ 최종 지급금액 = 유효활동 기준 지급 한도와 실제 사용금액 합계 중 더 낮은 금액
 
 ※ 멘토링 활동은 활동 사진 등록 시 인정됩니다.
    비용 사용이 없는 활동도 인정 가능합니다.
-   단, 비용 사용이 있는 경우에는 영수증 업로드가 필요합니다.
+   단, 비용 사용이 있는 경우에는 영수증 업로드와 사용 금액 입력이 필요합니다.
+
+   사진은 식사 활동뿐 아니라 채움·틔움·배움 프로그램 참여 사진, 사내 구성원 소개 및 교류 활동,
+   멘티 적응 지원 활동 등 멘토링 활동을 확인할 수 있는 내용이면 인정 가능합니다.
+
 ※ 총 최대 지급 금액: 300,000원 (3개월 합산)
 
 감사합니다.`
@@ -223,10 +278,12 @@ ${link}
 
 export function generateEndMailBody(record: MentoringRecord): string {
   const lines = record.months.map(m => {
-    const n   = countValidActivities(m)
-    const amt = getMonthlyPayment(m)
+    const n      = countValidActivities(m)
+    const cost   = getMonthActualCost(m)
+    const limit  = getMonthPaymentLimit(m)
+    const amt    = getMonthlyPayment(m)
     const { start, end } = getMonthPeriod(record.startDate, m.monthIndex)
-    return `  ${m.monthIndex}개월차 (${start} ~ ${end}): ${n}회 인정 → ${fmtAmount(amt)}`
+    return `  ${m.monthIndex}개월차 (${start} ~ ${end}): 유효 ${n}회 / 실제사용 ${fmtAmount(cost)} / 한도 ${fmtAmount(limit)} → 지급 ${fmtAmount(amt)}`
   })
   return `안녕하세요.
 
@@ -235,13 +292,16 @@ export function generateEndMailBody(record: MentoringRecord): string {
 ${record.mentorName}님, ${record.menteeName}님 멘토링이 종료되었습니다.
 활동 내역 및 지급 예정 금액을 안내드립니다.
 
+■ 멘토링 활동 기간
+${fmtPeriodMonthly(record.startDate, record.endDate)} (총 3개월)
+
 ■ 월별 활동 내역
 
 ${lines.join('\n')}
 
 ■ 지급 예정 총액: ${fmtAmount(getTotalExpectedPayment(record))}
 
-활동 기준 지급 예정 금액을 초과하여 사용하신 경우 초과 사용 금액은 지급되지 않습니다.
+활동 기준 지급 한도를 초과하여 사용하신 경우, 초과 사용 금액은 지급되지 않습니다.
 
 ■ 활동 등록 마감 안내
 
@@ -291,6 +351,7 @@ export const INITIAL_DATA: MentoringRecord[] = [
     id: '1',
     mentorName: '김멘토', mentorEmail: 'kim.mentor@hecto.co.kr',
     menteeName: '이멘티',
+    joinDate: '2026-05-15',
     joinMonth: '2026-05', startDate: '2026-05-01', endDate: '2026-07-31',
     status: 'active', uploadStatus: 'enabled', uploadBlockReason: '', note: '',
     token: 'mentor_a1b2c3',
@@ -306,11 +367,12 @@ export const INITIAL_DATA: MentoringRecord[] = [
     createdAt: '2026-05-01', deletedAt: null,
   },
 
-  // ── 2: 2026-04 입사, 1개월차 활동 3회, 2개월차 진행중, 목표 작성 완료
+  // ── 2: 2026-04 입사, 1개월차 3회 유효, 2개월차 진행중, 목표 작성 완료
   {
     id: '2',
     mentorName: '박멘토', mentorEmail: 'park.mentor@hecto.co.kr',
     menteeName: '최멘티',
+    joinDate: '2026-04-07',
     joinMonth: '2026-04', startDate: '2026-04-01', endDate: '2026-06-30',
     status: 'active', uploadStatus: 'enabled', uploadBlockReason: '', note: '',
     token: 'mentor_b4e5f6',
@@ -319,21 +381,21 @@ export const INITIAL_DATA: MentoringRecord[] = [
         monthIndex: 1,
         activities: [
           { id: 'a1', activityDate: '2026-04-05', content: '첫 만남 및 멘토링 계획 수립', memo: '',
-            photoName: 'photo_01.jpg', photoUrl: '', hasCost: false, receiptName: '', receiptUrl: '' },
+            photoName: 'photo_01.jpg', photoUrl: '', hasCost: false, costAmount: 0, receiptName: '', receiptUrl: '' },
           { id: 'a2', activityDate: '2026-04-15', content: '업무 적응 현황 공유 및 상담', memo: '',
-            photoName: 'photo_02.jpg', photoUrl: '', hasCost: true, receiptName: 'receipt_02.jpg', receiptUrl: '' },
+            photoName: 'photo_02.jpg', photoUrl: '', hasCost: true, costAmount: 15000, receiptName: 'receipt_02.jpg', receiptUrl: '' },
           { id: 'a3', activityDate: '2026-04-25', content: '조직 문화 이해도 점검', memo: '',
-            photoName: 'photo_03.jpg', photoUrl: '', hasCost: false, receiptName: '', receiptUrl: '' },
+            photoName: 'photo_03.jpg', photoUrl: '', hasCost: false, costAmount: 0, receiptName: '', receiptUrl: '' },
         ],
       },
       {
         monthIndex: 2,
         activities: [
           { id: 'a4', activityDate: '2026-05-08', content: '2개월차 목표 설정 미팅', memo: '',
-            photoName: 'photo_04.jpg', photoUrl: '', hasCost: false, receiptName: '', receiptUrl: '' },
-          // hasCost=true 이지만 영수증 없음 → 미인정 케이스
+            photoName: 'photo_04.jpg', photoUrl: '', hasCost: false, costAmount: 0, receiptName: '', receiptUrl: '' },
+          // hasCost=true이지만 영수증 없음 → 미인정
           { id: 'a5', activityDate: '2026-05-19', content: '실무 역량 강화 미팅', memo: '카페 미팅',
-            photoName: 'photo_05.jpg', photoUrl: '', hasCost: true, receiptName: '', receiptUrl: '' },
+            photoName: 'photo_05.jpg', photoUrl: '', hasCost: true, costAmount: 25000, receiptName: '', receiptUrl: '' },
         ],
       },
       { monthIndex: 3, activities: [] },
@@ -354,6 +416,7 @@ export const INITIAL_DATA: MentoringRecord[] = [
     id: '3',
     mentorName: '정멘토', mentorEmail: 'jung.mentor@hecto.co.kr',
     menteeName: '한멘티',
+    joinDate: '2026-03-04',
     joinMonth: '2026-03', startDate: '2026-03-01', endDate: '2026-05-31',
     status: 'active', uploadStatus: 'enabled', uploadBlockReason: '', note: '',
     token: 'mentor_c7d8e9',
@@ -362,29 +425,29 @@ export const INITIAL_DATA: MentoringRecord[] = [
         monthIndex: 1,
         activities: [
           { id: 'b1', activityDate: '2026-03-05', content: '첫 만남', memo: '',
-            photoName: 'p_b1.jpg', photoUrl: '', hasCost: false, receiptName: '', receiptUrl: '' },
+            photoName: 'p_b1.jpg', photoUrl: '', hasCost: false, costAmount: 0, receiptName: '', receiptUrl: '' },
           { id: 'b2', activityDate: '2026-03-14', content: '업무 적응', memo: '',
-            photoName: 'p_b2.jpg', photoUrl: '', hasCost: true, receiptName: 'r_b2.pdf', receiptUrl: '' },
+            photoName: 'p_b2.jpg', photoUrl: '', hasCost: true, costAmount: 20000, receiptName: 'r_b2.pdf', receiptUrl: '' },
           { id: 'b3', activityDate: '2026-03-24', content: '조직 문화', memo: '',
-            photoName: 'p_b3.jpg', photoUrl: '', hasCost: false, receiptName: '', receiptUrl: '' },
+            photoName: 'p_b3.jpg', photoUrl: '', hasCost: false, costAmount: 0, receiptName: '', receiptUrl: '' },
         ],
       },
       {
         monthIndex: 2,
         activities: [
           { id: 'b4', activityDate: '2026-04-07', content: '목표 설정', memo: '',
-            photoName: 'p_b4.jpg', photoUrl: '', hasCost: false, receiptName: '', receiptUrl: '' },
+            photoName: 'p_b4.jpg', photoUrl: '', hasCost: false, costAmount: 0, receiptName: '', receiptUrl: '' },
           { id: 'b5', activityDate: '2026-04-16', content: '실무 역량 강화', memo: '',
-            photoName: 'p_b5.jpg', photoUrl: '', hasCost: true, receiptName: 'r_b5.pdf', receiptUrl: '' },
+            photoName: 'p_b5.jpg', photoUrl: '', hasCost: true, costAmount: 30000, receiptName: 'r_b5.pdf', receiptUrl: '' },
           { id: 'b6', activityDate: '2026-04-25', content: '중간 점검', memo: '',
-            photoName: 'p_b6.jpg', photoUrl: '', hasCost: false, receiptName: '', receiptUrl: '' },
+            photoName: 'p_b6.jpg', photoUrl: '', hasCost: false, costAmount: 0, receiptName: '', receiptUrl: '' },
         ],
       },
       {
         monthIndex: 3,
         activities: [
           { id: 'b7', activityDate: '2026-05-08', content: '3개월차 마무리', memo: '',
-            photoName: 'p_b7.jpg', photoUrl: '', hasCost: false, receiptName: '', receiptUrl: '' },
+            photoName: 'p_b7.jpg', photoUrl: '', hasCost: false, costAmount: 0, receiptName: '', receiptUrl: '' },
         ],
       },
     ],
@@ -404,6 +467,7 @@ export const INITIAL_DATA: MentoringRecord[] = [
     id: '4',
     mentorName: '오멘토', mentorEmail: 'oh.mentor@hecto.co.kr',
     menteeName: '강멘티',
+    joinDate: '2026-04-01',
     joinMonth: '2026-04', startDate: '2026-04-01', endDate: '2026-06-30',
     status: 'suspended', uploadStatus: 'blocked', uploadBlockReason: '멘티 퇴사',
     note: '5월 초 멘티 퇴사로 멘토링 중단',
@@ -413,9 +477,9 @@ export const INITIAL_DATA: MentoringRecord[] = [
         monthIndex: 1,
         activities: [
           { id: 'c1', activityDate: '2026-04-10', content: '초기 미팅', memo: '',
-            photoName: 'p_c1.jpg', photoUrl: '', hasCost: false, receiptName: '', receiptUrl: '' },
+            photoName: 'p_c1.jpg', photoUrl: '', hasCost: false, costAmount: 0, receiptName: '', receiptUrl: '' },
           { id: 'c2', activityDate: '2026-04-22', content: '업무 환경 안내', memo: '',
-            photoName: 'p_c2.jpg', photoUrl: '', hasCost: true, receiptName: 'r_c2.pdf', receiptUrl: '' },
+            photoName: 'p_c2.jpg', photoUrl: '', hasCost: true, costAmount: 18000, receiptName: 'r_c2.pdf', receiptUrl: '' },
         ],
       },
       { monthIndex: 2, activities: [] },

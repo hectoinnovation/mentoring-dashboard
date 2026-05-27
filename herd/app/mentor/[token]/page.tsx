@@ -5,8 +5,10 @@ import { useParams } from 'next/navigation'
 import {
   MentoringRecord, MonthData, ActivityEntry, MentoringGoals,
   INITIAL_DATA, TODAY,
-  getMonthPeriod, getCurrentMonthIndex,
-  countValidActivities, countAllActivities, getMonthlyPayment, fmtAmount, getTotalExpectedPayment,
+  getMonthPeriod, getCurrentMonthIndex, fmtPeriodMonthly,
+  countValidActivities, countAllActivities,
+  getMonthActualCost, getMonthPaymentLimit, getMonthlyPayment,
+  getTotalExpectedPayment, fmtAmount,
 } from '@/lib/mentoring'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -21,14 +23,14 @@ function RemainingBadge({ valid }: { valid: number }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Goal-setting screen
+// Goal-setting screen (first visit)
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface GoalScreenProps {
   mentorName: string
   menteeName: string
-  initial: MentoringGoals
-  onSave: (goals: MentoringGoals) => void
+  initial:    MentoringGoals
+  onSave:     (goals: MentoringGoals) => void
 }
 
 function GoalScreen({ mentorName, menteeName, initial, onSave }: GoalScreenProps) {
@@ -41,31 +43,26 @@ function GoalScreen({ mentorName, menteeName, initial, onSave }: GoalScreenProps
       alert('기대사항 또는 협력사항을 한 줄 이상 입력해주세요.')
       return
     }
-    const goals: MentoringGoals = {
+    onSave({
       expectations: expectations as [string, string, string],
       cooperation:  cooperation  as [string, string, string],
       savedAt: TODAY,
-    }
-    onSave(goals)
+    })
   }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center px-4 py-10">
       <div className="bg-white rounded-2xl shadow-lg w-full max-w-2xl p-8">
-        {/* Header */}
         <div className="text-center mb-8">
           <div className="text-4xl mb-3">🎯</div>
           <h1 className="text-xl font-bold text-gray-800">멘토링 목표 달성을 위한 기대사항 및 협력사항</h1>
-          <p className="text-sm text-gray-500 mt-2">
-            멘토링을 시작하기 전에 서로의 기대사항과 협력사항을 작성해주세요.
-          </p>
+          <p className="text-sm text-gray-500 mt-2">멘토링을 시작하기 전에 서로의 기대사항과 협력사항을 작성해주세요.</p>
           <p className="text-xs text-gray-400 mt-1">
             멘토: <strong>{mentorName}</strong> &nbsp;|&nbsp; 멘티: <strong>{menteeName}</strong>
           </p>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* 기대사항 (멘티 관점) */}
           <div>
             <div className="flex items-center gap-2 mb-3">
               <span className="w-6 h-6 rounded-full bg-blue-100 text-blue-700 text-xs font-bold flex items-center justify-center">멘</span>
@@ -75,9 +72,7 @@ function GoalScreen({ mentorName, menteeName, initial, onSave }: GoalScreenProps
               {([0, 1, 2] as const).map(i => (
                 <div key={i} className="flex items-start gap-2">
                   <span className="mt-2 text-xs text-gray-400 font-medium w-4 flex-shrink-0">{i + 1}.</span>
-                  <input
-                    type="text"
-                    value={expectations[i]}
+                  <input type="text" value={expectations[i]}
                     onChange={e => {
                       const next = [...expectations] as [string, string, string]
                       next[i] = e.target.value
@@ -95,7 +90,6 @@ function GoalScreen({ mentorName, menteeName, initial, onSave }: GoalScreenProps
             </div>
           </div>
 
-          {/* 협력사항 (멘토 관점) */}
           <div>
             <div className="flex items-center gap-2 mb-3">
               <span className="w-6 h-6 rounded-full bg-green-100 text-green-700 text-xs font-bold flex items-center justify-center">토</span>
@@ -105,9 +99,7 @@ function GoalScreen({ mentorName, menteeName, initial, onSave }: GoalScreenProps
               {([0, 1, 2] as const).map(i => (
                 <div key={i} className="flex items-start gap-2">
                   <span className="mt-2 text-xs text-gray-400 font-medium w-4 flex-shrink-0">{i + 1}.</span>
-                  <input
-                    type="text"
-                    value={cooperation[i]}
+                  <input type="text" value={cooperation[i]}
                     onChange={e => {
                       const next = [...cooperation] as [string, string, string]
                       next[i] = e.target.value
@@ -127,16 +119,13 @@ function GoalScreen({ mentorName, menteeName, initial, onSave }: GoalScreenProps
         </div>
 
         <div className="mt-8 flex justify-center">
-          <button
-            onClick={handleSave}
-            className="px-8 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 active:bg-blue-800 transition-colors shadow-md"
-          >
+          <button onClick={handleSave}
+            className="px-8 py-3 bg-blue-600 text-white rounded-xl font-semibold hover:bg-blue-700 active:bg-blue-800 transition-colors shadow-md">
             목표 저장하고 시작하기
           </button>
         </div>
-
         <p className="text-center text-xs text-gray-400 mt-4">
-          저장 후에는 활동 등록 화면으로 이동합니다. 목표는 관리자 화면에서도 확인할 수 있습니다.
+          저장 후 활동 등록 화면으로 이동합니다. 목표는 관리자 화면에서도 확인할 수 있습니다.
         </p>
       </div>
     </div>
@@ -144,11 +133,11 @@ function GoalScreen({ mentorName, menteeName, initial, onSave }: GoalScreenProps
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Activity add form (inline, max 5 slots)
+// Activity add form (max 5 slots, costAmount required when hasCost)
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface ActivityFormProps {
-  onSave: (entry: Omit<ActivityEntry, 'id'>) => void
+  onSave:   (entry: Omit<ActivityEntry, 'id'>) => void
   onCancel: () => void
 }
 
@@ -157,13 +146,16 @@ function ActivityForm({ onSave, onCancel }: ActivityFormProps) {
   const [content, setContent]           = useState('')
   const [memo, setMemo]                 = useState('')
   const [hasCost, setHasCost]           = useState(false)
+  const [costAmountRaw, setCostAmountRaw] = useState('')  // string for input control
   const [photoFile, setPhotoFile]       = useState<File | null>(null)
   const [receiptFile, setReceiptFile]   = useState<File | null>(null)
 
-  // When hasCost is unchecked, clear receipt
   function handleHasCostChange(checked: boolean) {
     setHasCost(checked)
-    if (!checked) setReceiptFile(null)
+    if (!checked) {
+      setCostAmountRaw('')
+      setReceiptFile(null)
+    }
   }
 
   function handleSave() {
@@ -175,11 +167,25 @@ function ActivityForm({ onSave, onCancel }: ActivityFormProps) {
       alert('활동 사진은 필수입니다.')
       return
     }
+    if (hasCost) {
+      if (!costAmountRaw || costAmountRaw === '0') {
+        alert('비용 사용 있음 체크 시 사용 금액을 입력해야 합니다. (0원 불가)')
+        return
+      }
+      if (!receiptFile) {
+        alert('비용 사용 있음 체크 시 영수증을 업로드해야 합니다.')
+        return
+      }
+    }
+
+    const costAmount = hasCost ? parseInt(costAmountRaw.replace(/,/g, ''), 10) || 0 : 0
+
     onSave({
       activityDate,
       content,
       memo,
       hasCost,
+      costAmount,
       photoName:   photoFile?.name   ?? '',
       photoUrl:    photoFile ? URL.createObjectURL(photoFile) : '',
       receiptName: receiptFile?.name ?? '',
@@ -196,22 +202,15 @@ function ActivityForm({ onSave, onCancel }: ActivityFormProps) {
           <label className="block text-xs font-medium text-gray-600 mb-1">
             활동일 <span className="text-red-500">*</span>
           </label>
-          <input
-            type="date"
-            value={activityDate}
+          <input type="date" value={activityDate}
             onChange={e => setActivityDate(e.target.value)}
-            className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white"
-          />
+            className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white" />
         </div>
         <div>
           <label className="block text-xs font-medium text-gray-600 mb-1">메모</label>
-          <input
-            type="text"
-            value={memo}
-            onChange={e => setMemo(e.target.value)}
+          <input type="text" value={memo} onChange={e => setMemo(e.target.value)}
             placeholder="선택 사항"
-            className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white"
-          />
+            className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white" />
         </div>
       </div>
 
@@ -219,89 +218,93 @@ function ActivityForm({ onSave, onCancel }: ActivityFormProps) {
         <label className="block text-xs font-medium text-gray-600 mb-1">
           활동내용 <span className="text-red-500">*</span>
         </label>
-        <textarea
-          value={content}
-          onChange={e => setContent(e.target.value)}
-          rows={2}
-          placeholder="예: 입사 적응 현황 점검 및 상담"
-          className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white resize-none"
-        />
+        <textarea value={content} onChange={e => setContent(e.target.value)}
+          rows={2} placeholder="예: 입사 적응 현황 점검 및 상담"
+          className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white resize-none" />
       </div>
 
       {/* 활동 사진 */}
       <div>
         <label className="block text-xs font-medium text-gray-600 mb-1">
           활동 사진 <span className="text-red-500">*</span>
-          <span className="text-gray-400 font-normal ml-1">(필수 — 사진 없으면 유효 활동 미인정)</span>
+          <span className="text-gray-400 font-normal ml-1">(사진 없으면 유효 활동 미인정)</span>
         </label>
-        <input
-          type="file"
-          accept="image/*"
+        <input type="file" accept="image/*"
           onChange={e => setPhotoFile(e.target.files?.[0] ?? null)}
-          className="w-full text-xs text-gray-600 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:bg-gray-100 file:text-gray-700 file:text-xs hover:file:bg-gray-200"
-        />
-        {photoFile && (
-          <p className="text-xs text-green-600 mt-0.5">✓ {photoFile.name}</p>
-        )}
+          className="w-full text-xs text-gray-600 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:bg-gray-100 file:text-gray-700 file:text-xs hover:file:bg-gray-200" />
+        {photoFile && <p className="text-xs text-green-600 mt-0.5">✓ {photoFile.name}</p>}
       </div>
 
       {/* 비용 사용 체크박스 */}
-      <div className="flex items-center gap-2 py-1">
-        <input
-          id="hasCost"
-          type="checkbox"
-          checked={hasCost}
-          onChange={e => handleHasCostChange(e.target.checked)}
-          className="w-4 h-4 accent-blue-600 cursor-pointer"
-        />
-        <label htmlFor="hasCost" className="text-sm font-medium text-gray-700 cursor-pointer select-none">
-          비용 사용 있음
-        </label>
-        <span className="text-xs text-gray-400">(체크 시 영수증 필수)</span>
-      </div>
+      <div className="bg-white rounded-lg border border-gray-200 p-3 space-y-3">
+        <div className="flex items-center gap-2">
+          <input id="hasCost" type="checkbox" checked={hasCost}
+            onChange={e => handleHasCostChange(e.target.checked)}
+            className="w-4 h-4 accent-blue-600 cursor-pointer" />
+          <label htmlFor="hasCost" className="text-sm font-medium text-gray-700 cursor-pointer select-none">
+            비용 사용 있음
+          </label>
+          <span className="text-xs text-gray-400">(체크 시 사용 금액 + 영수증 필수)</span>
+        </div>
 
-      {/* 영수증 — hasCost가 true일 때만 활성화 */}
-      <div>
-        <label className={`block text-xs font-medium mb-1 ${hasCost ? 'text-gray-600' : 'text-gray-300'}`}>
-          영수증
-          {hasCost && <span className="text-red-500 ml-0.5">*</span>}
-          {!hasCost && <span className="ml-1 font-normal">(비용 사용 없음 선택 시 비활성화)</span>}
-        </label>
-        <input
-          type="file"
-          accept="image/*,application/pdf"
-          disabled={!hasCost}
-          onChange={e => setReceiptFile(e.target.files?.[0] ?? null)}
-          className={`w-full text-xs ${hasCost ? 'text-gray-600' : 'text-gray-300 opacity-50 cursor-not-allowed'}
-            file:mr-2 file:py-1 file:px-2 file:rounded file:border-0
-            ${hasCost ? 'file:bg-gray-100 file:text-gray-700 hover:file:bg-gray-200' : 'file:bg-gray-50 file:text-gray-300'}
-            file:text-xs`}
-        />
-        {receiptFile && hasCost && (
-          <p className="text-xs text-green-600 mt-0.5">✓ {receiptFile.name}</p>
-        )}
+        {/* 사용 금액 입력 */}
+        <div>
+          <label className={`block text-xs font-medium mb-1 ${hasCost ? 'text-gray-600' : 'text-gray-300'}`}>
+            사용 금액{hasCost && <span className="text-red-500 ml-0.5">*</span>}
+            {!hasCost && <span className="ml-1 font-normal">(비활성화)</span>}
+          </label>
+          <div className="flex items-center gap-2">
+            <input
+              type="number"
+              min="1"
+              value={costAmountRaw}
+              disabled={!hasCost}
+              onChange={e => setCostAmountRaw(e.target.value)}
+              placeholder="금액 입력 (숫자만)"
+              className={`flex-1 border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white ${
+                hasCost ? 'border-gray-300' : 'border-gray-100 text-gray-300 cursor-not-allowed opacity-50'
+              }`}
+            />
+            <span className={`text-sm ${hasCost ? 'text-gray-600' : 'text-gray-300'}`}>원</span>
+          </div>
+          {hasCost && costAmountRaw && Number(costAmountRaw) > 0 && (
+            <p className="text-xs text-blue-600 mt-0.5">
+              입력 금액: {Number(costAmountRaw).toLocaleString()}원
+            </p>
+          )}
+        </div>
+
+        {/* 영수증 업로드 */}
+        <div>
+          <label className={`block text-xs font-medium mb-1 ${hasCost ? 'text-gray-600' : 'text-gray-300'}`}>
+            영수증{hasCost && <span className="text-red-500 ml-0.5">*</span>}
+            {!hasCost && <span className="ml-1 font-normal">(비활성화)</span>}
+          </label>
+          <input type="file" accept="image/*,application/pdf"
+            disabled={!hasCost}
+            onChange={e => setReceiptFile(e.target.files?.[0] ?? null)}
+            className={`w-full text-xs file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-xs ${
+              hasCost
+                ? 'text-gray-600 file:bg-gray-100 file:text-gray-700 hover:file:bg-gray-200'
+                : 'text-gray-300 file:bg-gray-50 file:text-gray-300 opacity-50 cursor-not-allowed'
+            }`}
+          />
+          {receiptFile && hasCost && (
+            <p className="text-xs text-green-600 mt-0.5">✓ {receiptFile.name}</p>
+          )}
+        </div>
       </div>
 
       <div className="flex justify-end gap-2 pt-1">
-        <button
-          onClick={onCancel}
-          className="px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded-lg"
-        >
-          취소
-        </button>
-        <button
-          onClick={handleSave}
-          className="px-4 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-        >
-          저장
-        </button>
+        <button onClick={onCancel} className="px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">취소</button>
+        <button onClick={handleSave} className="px-4 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">저장</button>
       </div>
     </div>
   )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Month card (max 5 activities)
+// Month card
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface MonthCardProps {
@@ -313,14 +316,14 @@ interface MonthCardProps {
   onAddActivity:     (entry: Omit<ActivityEntry, 'id'>) => void
 }
 
-function MonthCard({
-  monthData, monthIndex, startDate, currentMonthIndex, uploadBlocked, onAddActivity,
-}: MonthCardProps) {
+function MonthCard({ monthData, monthIndex, startDate, currentMonthIndex, uploadBlocked, onAddActivity }: MonthCardProps) {
   const [showForm, setShowForm] = useState(false)
   const { start, end } = getMonthPeriod(startDate, monthIndex)
-  const valid   = countValidActivities(monthData)
-  const total   = countAllActivities(monthData)
-  const amount  = getMonthlyPayment(monthData)
+  const valid      = countValidActivities(monthData)
+  const total      = countAllActivities(monthData)
+  const actualCost = getMonthActualCost(monthData)
+  const limit      = getMonthPaymentLimit(monthData)
+  const amount     = getMonthlyPayment(monthData)
   const isPast    = currentMonthIndex > monthIndex
   const isCurrent = currentMonthIndex === monthIndex
   const isFuture  = currentMonthIndex < monthIndex
@@ -343,39 +346,42 @@ function MonthCard({
               <span className={`text-base font-bold ${isCurrent ? 'text-blue-700' : 'text-gray-700'}`}>
                 {monthIndex}개월차
               </span>
-              {isCurrent && (
-                <span className="text-xs bg-blue-600 text-white rounded-full px-2 py-0.5 font-medium">진행중</span>
-              )}
-              {isPast && (
-                <span className="text-xs bg-gray-200 text-gray-600 rounded-full px-2 py-0.5 font-medium">완료</span>
-              )}
-              {isFuture && (
-                <span className="text-xs bg-gray-100 text-gray-400 rounded-full px-2 py-0.5">예정</span>
-              )}
+              {isCurrent && <span className="text-xs bg-blue-600 text-white rounded-full px-2 py-0.5 font-medium">진행중</span>}
+              {isPast   && <span className="text-xs bg-gray-200 text-gray-600 rounded-full px-2 py-0.5 font-medium">완료</span>}
+              {isFuture && <span className="text-xs bg-gray-100 text-gray-400 rounded-full px-2 py-0.5">예정</span>}
             </div>
             <p className="text-xs text-gray-500 mt-0.5">{start} ~ {end}</p>
           </div>
 
-          {/* Stats */}
-          <div className="flex items-center gap-4">
-            {/* 등록 횟수 */}
+          {/* Stats 4개 */}
+          <div className="flex items-center gap-3 flex-wrap">
             <div className="text-right">
-              <div className="text-xs text-gray-400">활동 증빙 등록 횟수</div>
+              <div className="text-xs text-gray-400">활동 증빙</div>
               <div className="font-bold text-base text-gray-800">
                 {total}<span className="text-gray-400 font-normal text-sm">/5회</span>
               </div>
             </div>
-            {/* 지급 인정 */}
             <div className="text-right border-l border-gray-200 pl-3">
               <div className="text-xs text-gray-400">지급 인정</div>
               <div className="flex items-center gap-1">
                 <span className={`font-bold text-base ${valid >= 3 ? 'text-green-600' : valid === 0 ? 'text-gray-400' : 'text-amber-600'}`}>
-                  {valid}회
+                  {valid >= 3 ? '3회 이상' : `${valid}회`}
                 </span>
                 <RemainingBadge valid={valid} />
               </div>
             </div>
-            {/* 지급 예정 금액 */}
+            <div className="text-right border-l border-gray-200 pl-3">
+              <div className="text-xs text-gray-400">실제 사용금액</div>
+              <div className={`font-bold text-base ${actualCost > 0 ? 'text-gray-800' : 'text-gray-400'}`}>
+                {fmtAmount(actualCost)}
+              </div>
+            </div>
+            <div className="text-right border-l border-gray-200 pl-3">
+              <div className="text-xs text-gray-400">지급 한도</div>
+              <div className={`font-bold text-base ${limit > 0 ? 'text-amber-600' : 'text-gray-400'}`}>
+                {fmtAmount(limit)}
+              </div>
+            </div>
             <div className="text-right border-l border-gray-200 pl-3">
               <div className="text-xs text-gray-400">지급 예정 금액</div>
               <div className={`font-bold text-base ${amount > 0 ? 'text-blue-600' : 'text-gray-400'}`}>
@@ -394,10 +400,9 @@ function MonthCard({
           <div className="space-y-2.5">
             {monthData.activities.map((a, idx) => {
               const hasPhoto = !!a.photoName
-              const isValid  = hasPhoto && (!a.hasCost || !!a.receiptName)
+              const isValid  = hasPhoto && (!a.hasCost || (!!a.receiptName && a.costAmount > 0))
               return (
-                <div
-                  key={a.id}
+                <div key={a.id}
                   className={`flex items-start gap-3 p-3 rounded-lg border ${
                     isValid ? 'border-green-200 bg-green-50' : 'border-orange-100 bg-orange-50'
                   }`}
@@ -414,23 +419,26 @@ function MonthCard({
                     </div>
                     {a.memo && <p className="text-xs text-gray-500 mt-0.5">{a.memo}</p>}
                     <div className="flex gap-2 mt-1.5 flex-wrap">
-                      {/* 사진 */}
                       <span className={`text-xs px-1.5 py-0.5 rounded ${
                         a.photoName ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-500'
                       }`}>
                         {a.photoName ? `📷 ${a.photoName}` : '📷 사진 없음'}
                       </span>
-                      {/* 비용/영수증 */}
                       {a.hasCost ? (
-                        <span className={`text-xs px-1.5 py-0.5 rounded ${
-                          a.receiptName ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-500'
-                        }`}>
-                          {a.receiptName ? `🧾 ${a.receiptName}` : '🧾 영수증 없음 (미인정)'}
-                        </span>
+                        <>
+                          <span className={`text-xs px-1.5 py-0.5 rounded ${
+                            a.receiptName ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-500'
+                          }`}>
+                            {a.receiptName ? `🧾 ${a.receiptName}` : '🧾 영수증 없음'}
+                          </span>
+                          <span className={`text-xs px-1.5 py-0.5 rounded ${
+                            a.costAmount > 0 ? 'bg-blue-50 text-blue-700' : 'bg-red-100 text-red-500'
+                          }`}>
+                            💰 {a.costAmount > 0 ? `${a.costAmount.toLocaleString()}원` : '금액 미입력'}
+                          </span>
+                        </>
                       ) : (
-                        <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">
-                          💰 비용 없음
-                        </span>
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">💰 비용 없음</span>
                       )}
                       {isValid
                         ? <span className="text-xs text-green-600 font-medium">✓ 유효</span>
@@ -444,41 +452,25 @@ function MonthCard({
           </div>
         )}
 
-        {/* Slot indicators */}
+        {/* Slot indicator bar */}
         {!isFuture && (
           <div className="flex gap-1.5 mt-3">
             {Array.from({ length: 5 }).map((_, i) => (
-              <div
-                key={i}
-                className={`flex-1 h-1.5 rounded-full ${
-                  i < total ? (
-                    countValidActivities({ ...monthData, activities: monthData.activities.slice(0, i + 1) }) > 0
-                    ? 'bg-green-400'
-                    : 'bg-orange-300'
-                  ) : 'bg-gray-200'
-                }`}
-              />
+              <div key={i} className={`flex-1 h-1.5 rounded-full ${i < total ? 'bg-blue-400' : 'bg-gray-200'}`} />
             ))}
           </div>
         )}
 
-        {/* Add activity button / form */}
+        {/* Add button / form */}
         {!isFuture && !uploadBlocked && (
           <div className="mt-3">
             {showForm ? (
-              <ActivityForm
-                onSave={handleSave}
-                onCancel={() => setShowForm(false)}
-              />
+              <ActivityForm onSave={handleSave} onCancel={() => setShowForm(false)} />
             ) : isFull ? (
-              <p className="text-xs text-gray-400 text-center py-2">
-                최대 5개 활동이 등록되었습니다
-              </p>
+              <p className="text-xs text-gray-400 text-center py-2">최대 5개 활동이 등록되었습니다</p>
             ) : (
-              <button
-                onClick={() => setShowForm(true)}
-                className="w-full py-2 border-2 border-dashed border-blue-300 text-blue-600 text-sm rounded-lg hover:bg-blue-50 transition-colors"
-              >
+              <button onClick={() => setShowForm(true)}
+                className="w-full py-2 border-2 border-dashed border-blue-300 text-blue-600 text-sm rounded-lg hover:bg-blue-50 transition-colors">
                 + 활동 추가 ({total}/5)
               </button>
             )}
@@ -508,7 +500,7 @@ export default function MentorPage() {
     return found ?? null
   })
 
-  // Goal screen state: null = loading, false = show goal screen, true = show main
+  // null=loading, false=show goal screen, true=show main
   const [goalsDone, setGoalsDone] = useState<boolean | null>(null)
 
   useEffect(() => {
@@ -519,33 +511,22 @@ export default function MentorPage() {
       if (stored) {
         const parsed: MentoringGoals = JSON.parse(stored)
         if (parsed.savedAt) {
-          // sync into record
           setRecord(prev => prev ? { ...prev, goals: parsed } : prev)
           setGoalsDone(true)
           return
         }
       }
-    } catch { /* ignore parse errors */ }
-    // Check if goals were already saved in the record itself
-    if (record.goals.savedAt) {
-      setGoalsDone(true)
-    } else {
-      setGoalsDone(false)
-    }
+    } catch { /* ignore */ }
+    setGoalsDone(record.goals.savedAt ? true : false)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Goal save handler
   function handleGoalSave(goals: MentoringGoals) {
     if (!record) return
-    const key = `mentor_goals_${record.token}`
-    try {
-      localStorage.setItem(key, JSON.stringify(goals))
-    } catch { /* ignore */ }
+    try { localStorage.setItem(`mentor_goals_${record.token}`, JSON.stringify(goals)) } catch { /* ignore */ }
     setRecord(prev => prev ? { ...prev, goals } : prev)
     setGoalsDone(true)
   }
 
-  // ── Add activity
   function addActivity(monthIndex: 1 | 2 | 3, entry: Omit<ActivityEntry, 'id'>) {
     const newActivity: ActivityEntry = { id: `act_${Date.now()}`, ...entry }
     setRecord(prev => {
@@ -561,10 +542,8 @@ export default function MentorPage() {
     })
   }
 
-  // ── Loading guard (hydration)
   if (goalsDone === null) return null
 
-  // ── Not found
   if (!record) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
@@ -577,7 +556,6 @@ export default function MentorPage() {
     )
   }
 
-  // ── Goal-setting screen (first visit)
   if (!goalsDone) {
     return (
       <GoalScreen
@@ -589,10 +567,8 @@ export default function MentorPage() {
     )
   }
 
-  // ── Main mentor page
-  const currentMI  = getCurrentMonthIndex(record)
-  const isBlocked  = record.uploadStatus === 'blocked'
-  const totalValid = record.months.reduce((s, m) => s + countValidActivities(m), 0)
+  const currentMI   = getCurrentMonthIndex(record)
+  const isBlocked   = record.uploadStatus === 'blocked'
   const totalAmount = getTotalExpectedPayment(record)
 
   return (
@@ -613,16 +589,14 @@ export default function MentorPage() {
 
       <main className="max-w-3xl mx-auto px-4 py-6 space-y-5">
 
-        {/* ── Upload blocked banner */}
+        {/* 업로드 차단 배너 */}
         {isBlocked && (
           <div className="bg-red-50 border border-red-300 rounded-xl px-5 py-4">
             <div className="flex items-start gap-3">
               <span className="text-xl flex-shrink-0">🚫</span>
               <div>
                 <p className="font-semibold text-red-700 text-sm">업로드가 제한되어 있습니다</p>
-                <p className="text-sm text-red-600 mt-0.5">
-                  해당 멘토링은 관리자에 의해 업로드가 제한되었습니다.
-                </p>
+                <p className="text-sm text-red-600 mt-0.5">해당 멘토링은 관리자에 의해 업로드가 제한되었습니다.</p>
                 {record.uploadBlockReason && (
                   <p className="text-xs text-red-500 mt-1">사유: {record.uploadBlockReason}</p>
                 )}
@@ -632,39 +606,37 @@ export default function MentorPage() {
           </div>
         )}
 
-        {/* ── Mentoring info card */}
+        {/* 멘토링 정보 */}
         <div className="bg-white rounded-xl border border-gray-200 px-5 py-4">
           <h2 className="text-sm font-semibold text-gray-700 mb-3">멘토링 정보</h2>
           <div className="grid grid-cols-2 gap-4 text-sm">
             <div>
               <span className="text-xs text-gray-400">멘토</span>
               <p className="font-medium text-gray-800">{record.mentorName}</p>
-              {record.mentorEmail && (
-                <p className="text-xs text-gray-500">{record.mentorEmail}</p>
-              )}
+              {record.mentorEmail && <p className="text-xs text-gray-500">{record.mentorEmail}</p>}
             </div>
             <div>
               <span className="text-xs text-gray-400">멘티</span>
               <p className="font-medium text-gray-800">{record.menteeName}</p>
             </div>
             <div>
-              <span className="text-xs text-gray-400">멘토링 기간</span>
-              <p className="text-gray-700">
-                {record.joinMonth.slice(0, 7)} ~ {record.endDate.slice(0, 7)}
-              </p>
+              <span className="text-xs text-gray-400">입사일</span>
+              <p className="text-gray-700 font-medium">{record.joinDate}</p>
+            </div>
+            <div>
+              <span className="text-xs text-gray-400">멘토링 활동 기간</span>
+              <p className="text-gray-700">{fmtPeriodMonthly(record.startDate, record.endDate)}</p>
             </div>
             <div>
               <span className="text-xs text-gray-400">현재</span>
               <p className="text-gray-700">
-                {currentMI === 0 ? '대기 중'
-                  : currentMI === 4 ? '기간 종료'
-                  : `${currentMI}개월차 진행중`}
+                {currentMI === 0 ? '대기 중' : currentMI === 4 ? '기간 종료' : `${currentMI}개월차 진행중`}
               </p>
             </div>
           </div>
         </div>
 
-        {/* ── Goals summary */}
+        {/* 목표 요약 */}
         {record.goals.savedAt && (
           <div className="bg-indigo-50 border border-indigo-200 rounded-xl px-5 py-4">
             <div className="flex items-center justify-between mb-3">
@@ -680,9 +652,6 @@ export default function MentorPage() {
                       <span className="text-indigo-400">{i + 1}.</span>{v}
                     </li>
                   ))}
-                  {record.goals.expectations.every(v => !v.trim()) && (
-                    <li className="text-xs text-indigo-300">내용 없음</li>
-                  )}
                 </ul>
               </div>
               <div>
@@ -693,21 +662,14 @@ export default function MentorPage() {
                       <span className="text-green-400">{i + 1}.</span>{v}
                     </li>
                   ))}
-                  {record.goals.cooperation.every(v => !v.trim()) && (
-                    <li className="text-xs text-green-300">내용 없음</li>
-                  )}
                 </ul>
               </div>
             </div>
           </div>
         )}
 
-        {/* ── Summary bar */}
-        <div className="grid grid-cols-3 gap-3">
-          <div className="bg-white rounded-lg border border-gray-200 px-4 py-3 text-center">
-            <div className="text-xs text-gray-400">전체 유효 활동</div>
-            <div className="font-bold text-lg mt-0.5 text-gray-800">{totalValid}회</div>
-          </div>
+        {/* 요약 바 */}
+        <div className="grid grid-cols-2 gap-3">
           <div className="bg-white rounded-lg border border-gray-200 px-4 py-3 text-center">
             <div className="text-xs text-gray-400">지급 예상액 합산</div>
             <div className={`font-bold text-lg mt-0.5 ${totalAmount > 0 ? 'text-blue-600' : 'text-gray-400'}`}>
@@ -725,18 +687,19 @@ export default function MentorPage() {
           </div>
         </div>
 
-        {/* ── Payment guide */}
+        {/* 지급 기준 안내 */}
         <div className="bg-amber-50 border border-amber-200 rounded-xl px-5 py-3 text-sm text-amber-800">
           <p className="font-medium mb-1">💡 지급 기준</p>
           <ul className="text-xs space-y-0.5 text-amber-700">
-            <li>• 활동 사진이 있으면 유효 활동으로 인정 (비용 없는 경우)</li>
-            <li>• 비용이 발생한 경우, 사진 + 영수증이 <strong>모두</strong> 있어야 유효</li>
-            <li>• 유효 활동 2회: 50,000원 / 3회 이상: 100,000원 (월 최대)</li>
+            <li>• 활동 사진이 있으면 인정 (비용 없는 경우)</li>
+            <li>• 비용이 있는 경우 사진 + 영수증 + 사용 금액 입력이 <strong>모두</strong> 있어야 유효</li>
+            <li>• 유효 2회: 50,000원 한도 / 3회 이상: 100,000원 한도</li>
+            <li>• <strong>최종 지급금액 = min(지급 한도, 실제 사용금액 합계)</strong></li>
             <li>• 총 최대 지급액: 300,000원 (3개월 합산)</li>
           </ul>
         </div>
 
-        {/* ── Month cards */}
+        {/* 월별 카드 */}
         {([1, 2, 3] as const).map(mi => {
           const md = record.months.find(m => m.monthIndex === mi)
           if (!md) return null
@@ -753,7 +716,6 @@ export default function MentorPage() {
           )
         })}
 
-        {/* ── Footer */}
         <div className="text-center text-xs text-gray-400 pb-6">
           문의사항은 인재협업팀으로 연락주세요.
         </div>

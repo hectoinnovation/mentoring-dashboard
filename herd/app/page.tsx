@@ -4,9 +4,10 @@ import { useState, useMemo, useEffect } from 'react'
 import {
   MentoringRecord, MentoringStatus, UploadStatus, MentoringGoals,
   INITIAL_DATA, createEmptyMonths, createEmptyGoals, generateToken,
-  calcDatesFromJoinMonth, TODAY,
+  calcDatesFromJoinMonth, fmtPeriodMonthly, TODAY,
   getMonthYM, getCurrentMonthIndex, getMonthDataForYM,
-  countValidActivities, countAllActivities, getMonthlyPayment,
+  countValidActivities, countAllActivities,
+  getMonthlyPayment, getMonthActualCost, getMonthPaymentLimit,
   getTotalExpectedPayment, fmtAmount,
   generateInitialGuideMailBody, generateEndMailBody,
   sendInitialGuideMail, sendEndMail,
@@ -38,6 +39,7 @@ function Chip({ label, color }: { label: string; color: string }) {
 
 const blankForm = () => ({
   mentorName: '', mentorEmail: '', menteeName: '',
+  joinDate: '',
   joinMonth: '', startDate: '', endDate: '',
   status: 'active' as MentoringStatus,
   uploadStatus: 'enabled' as UploadStatus,
@@ -49,13 +51,9 @@ type FormState = ReturnType<typeof blankForm>
 // Login screen
 // ─────────────────────────────────────────────────────────────────────────────
 
-function LoginScreen({
-  onAuth,
-}: {
-  onAuth: () => void
-}) {
-  const [pwd, setPwd] = useState('')
-  const [err, setErr] = useState('')
+function LoginScreen({ onAuth }: { onAuth: () => void }) {
+  const [pwd, setPwd]       = useState('')
+  const [err, setErr]       = useState('')
   const [loading, setLoading] = useState(false)
 
   async function handleLogin(e: React.FormEvent) {
@@ -129,18 +127,18 @@ export default function AdminDashboard() {
 
   // ── data
   const [records, setRecords] = useState<MentoringRecord[]>(INITIAL_DATA)
-  const [tab, setTab] = useState<Tab>('overview')
+  const [tab, setTab]         = useState<Tab>('overview')
 
   // ── add/edit modal
   const [showAddEdit, setShowAddEdit] = useState(false)
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [form, setForm] = useState<FormState>(blankForm())
+  const [editingId, setEditingId]     = useState<string | null>(null)
+  const [form, setForm]               = useState<FormState>(blankForm())
 
   // ── delete modal
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null)
 
   // ── block modal
-  const [blockTargetId, setBlockTargetId] = useState<string | null>(null)
+  const [blockTargetId, setBlockTargetId]       = useState<string | null>(null)
   const [blockReasonPreset, setBlockReasonPreset] = useState('멘티 퇴사')
   const [blockReasonCustom, setBlockReasonCustom] = useState('')
 
@@ -149,10 +147,10 @@ export default function AdminDashboard() {
 
   // ── mail
   const [mailPreviewRecord, setMailPreviewRecord] = useState<MentoringRecord | null>(null)
-  const [mailPreviewType, setMailPreviewType] = useState<'initial' | 'end'>('initial')
-  const [mailSending, setMailSending] = useState(false)
-  const [selectedForMail, setSelectedForMail] = useState<Set<string>>(new Set())
-  const [bulkSending, setBulkSending] = useState<'initial' | 'end' | null>(null)
+  const [mailPreviewType, setMailPreviewType]     = useState<'initial' | 'end'>('initial')
+  const [mailSending, setMailSending]             = useState(false)
+  const [selectedForMail, setSelectedForMail]     = useState<Set<string>>(new Set())
+  const [bulkSending, setBulkSending]             = useState<'initial' | 'end' | null>(null)
 
   // ── settlement
   const [settlementYM, setSettlementYM] = useState(TODAY.slice(0, 7))
@@ -161,7 +159,7 @@ export default function AdminDashboard() {
   // Derived
   // ─────────────────────────────────────────────────────────────────────────
 
-  const visible = useMemo(() => records.filter(r => r.status !== 'deleted'), [records])
+  const visible   = useMemo(() => records.filter(r => r.status !== 'deleted'), [records])
   const currentYM = TODAY.slice(0, 7)
 
   const thisMonthExpected = useMemo(() =>
@@ -175,27 +173,27 @@ export default function AdminDashboard() {
     visible.reduce((s, r) => s + getTotalExpectedPayment(r), 0),
   [visible])
 
-  const activeCount  = useMemo(() => visible.filter(r => r.status === 'active').length, [visible])
-  const blockedCount = useMemo(() => visible.filter(r => r.uploadStatus === 'blocked').length, [visible])
+  const activeCount   = useMemo(() => visible.filter(r => r.status === 'active').length, [visible])
+  const blockedCount  = useMemo(() => visible.filter(r => r.uploadStatus === 'blocked').length, [visible])
   const goalsSetCount = useMemo(() => visible.filter(r => r.goals.savedAt !== null).length, [visible])
 
   const settlementRows = useMemo(() => {
     const rows: {
-      record: MentoringRecord
+      record:     MentoringRecord
       monthIndex: number
-      total: number
-      valid: number
-      amount: number
+      actualCost: number
+      limit:      number
+      amount:     number
     }[] = []
     for (const r of visible) {
       for (const m of r.months) {
         if (getMonthYM(r.startDate, m.monthIndex) === settlementYM) {
           rows.push({
-            record: r,
+            record:     r,
             monthIndex: m.monthIndex,
-            total:  countAllActivities(m),
-            valid:  countValidActivities(m),
-            amount: getMonthlyPayment(m),
+            actualCost: getMonthActualCost(m),
+            limit:      getMonthPaymentLimit(m),
+            amount:     getMonthlyPayment(m),
           })
         }
       }
@@ -217,12 +215,24 @@ export default function AdminDashboard() {
     setForm({
       mentorName: r.mentorName, mentorEmail: r.mentorEmail,
       menteeName: r.menteeName,
+      joinDate: r.joinDate,
       joinMonth: r.joinMonth, startDate: r.startDate, endDate: r.endDate,
       status: r.status, uploadStatus: r.uploadStatus,
       uploadBlockReason: r.uploadBlockReason, note: r.note,
     })
     setEditingId(r.id)
     setShowAddEdit(true)
+  }
+
+  function handleJoinDateChange(jd: string) {
+    const jm = jd ? jd.slice(0, 7) : ''
+    setForm(p => ({ ...p, joinDate: jd }))
+    if (jm) {
+      const dates = calcDatesFromJoinMonth(jm)
+      setForm(p => ({ ...p, joinDate: jd, joinMonth: jm, ...dates }))
+    } else {
+      setForm(p => ({ ...p, joinDate: '', joinMonth: '', startDate: '', endDate: '' }))
+    }
   }
 
   function handleJoinMonthChange(jm: string) {
@@ -235,8 +245,8 @@ export default function AdminDashboard() {
   }
 
   function saveForm() {
-    if (!form.mentorName || !form.mentorEmail || !form.menteeName || !form.joinMonth) {
-      alert('멘토명, 멘토 이메일, 멘티명, 입사월은 필수입니다.')
+    if (!form.mentorName || !form.mentorEmail || !form.menteeName || !form.joinDate || !form.joinMonth) {
+      alert('멘토명, 멘토 이메일, 멘티명, 입사일, 입사월은 필수입니다.')
       return
     }
     if (editingId) {
@@ -244,6 +254,7 @@ export default function AdminDashboard() {
         ...r,
         mentorName: form.mentorName, mentorEmail: form.mentorEmail,
         menteeName: form.menteeName,
+        joinDate: form.joinDate,
         joinMonth: form.joinMonth, startDate: form.startDate, endDate: form.endDate,
         status: form.status, uploadStatus: form.uploadStatus,
         uploadBlockReason: form.uploadBlockReason, note: form.note,
@@ -253,6 +264,7 @@ export default function AdminDashboard() {
         id: Date.now().toString(),
         mentorName: form.mentorName, mentorEmail: form.mentorEmail,
         menteeName: form.menteeName,
+        joinDate: form.joinDate,
         joinMonth: form.joinMonth, startDate: form.startDate, endDate: form.endDate,
         status: form.status, uploadStatus: form.uploadStatus,
         uploadBlockReason: form.uploadBlockReason, note: form.note,
@@ -311,7 +323,6 @@ export default function AdminDashboard() {
   }
 
   function openGoalsModal(r: MentoringRecord) {
-    // localStorage에 저장된 목표가 있으면 우선 적용 (멘토가 설정한 경우)
     try {
       const saved = localStorage.getItem(`mentor_goals_${r.token}`)
       if (saved) {
@@ -319,7 +330,7 @@ export default function AdminDashboard() {
         setGoalsModalRecord({ ...r, goals })
         return
       }
-    } catch {}
+    } catch { /* ignore */ }
     setGoalsModalRecord(r)
   }
 
@@ -412,14 +423,15 @@ export default function AdminDashboard() {
   async function downloadExcel() {
     const XLSX = await import('xlsx')
     const data = settlementRows.map(row => ({
-      멘토명:      row.record.mentorName,
-      멘토이메일:   row.record.mentorEmail,
-      멘티명:      row.record.menteeName,
-      활동월:      settlementYM,
-      개월차:      `${row.monthIndex}개월차`,
-      활동등록횟수: row.total,
-      유효활동횟수: row.valid,
-      지급금액:    row.amount,
+      멘토명:        row.record.mentorName,
+      멘토이메일:    row.record.mentorEmail,
+      멘티명:        row.record.menteeName,
+      입사일:        row.record.joinDate,
+      활동월:        settlementYM,
+      개월차:        `${row.monthIndex}개월차`,
+      실제사용금액:  row.actualCost,
+      지급한도:      row.limit,
+      최종지급금액:  row.amount,
     }))
     const ws = XLSX.utils.json_to_sheet(data)
     const wb = XLSX.utils.book_new()
@@ -435,7 +447,7 @@ export default function AdminDashboard() {
   // Auth guard
   // ─────────────────────────────────────────────────────────────────────────
 
-  if (authed === null) return null // hydration 전 flash 방지
+  if (authed === null) return null
   if (!authed) return <LoginScreen onAuth={() => setAuthed(true)} />
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -468,10 +480,10 @@ export default function AdminDashboard() {
         <div className="max-w-[1400px] mx-auto">
           <nav className="flex">
             {([
-              ['overview', '전체현황'],
-              ['manage', '멘토/멘티관리'],
-              ['mail', '안내메일'],
-              ['settlement', '최종정산'],
+              ['overview',    '전체현황'],
+              ['manage',      '멘토/멘티관리'],
+              ['mail',        '안내메일'],
+              ['settlement',  '최종정산'],
             ] as [Tab, string][]).map(([t, label]) => (
               <button key={t} onClick={() => setTab(t)}
                 className={`px-5 py-3 text-sm font-medium border-b-2 transition-colors ${
@@ -495,11 +507,11 @@ export default function AdminDashboard() {
           <>
             <div className="grid grid-cols-5 gap-4">
               {[
-                { label: '이번달 지급예정', value: fmtAmount(thisMonthExpected), color: 'text-blue-600' },
-                { label: '전체 예상 지급액', value: fmtAmount(totalExpected), color: 'text-green-600' },
-                { label: '진행중', value: `${activeCount}건`, color: 'text-indigo-600' },
-                { label: '업로드 차단', value: `${blockedCount}건`, color: 'text-red-600' },
-                { label: '목표 설정 완료', value: `${goalsSetCount}건`, color: 'text-amber-600' },
+                { label: '이번달 지급예정',  value: fmtAmount(thisMonthExpected), color: 'text-blue-600' },
+                { label: '전체 예상 지급액', value: fmtAmount(totalExpected),    color: 'text-green-600' },
+                { label: '진행중',           value: `${activeCount}건`,           color: 'text-indigo-600' },
+                { label: '업로드 차단',      value: `${blockedCount}건`,          color: 'text-red-600' },
+                { label: '목표 설정 완료',   value: `${goalsSetCount}건`,         color: 'text-amber-600' },
               ].map(c => (
                 <div key={c.label} className="bg-white rounded-lg border border-gray-200 p-4">
                   <div className="text-xs text-gray-500">{c.label}</div>
@@ -516,25 +528,26 @@ export default function AdminDashboard() {
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 text-gray-600">
                     <tr>
-                      {['멘토', '멘티', '기간', '진행월', '활동', '유효', '지급(예상)', '상태', '업로드', '목표'].map(h => (
+                      {['멘토', '멘티', '입사일', '활동기간', '진행월', '활동', '유효', '지급(예상)', '상태', '업로드', '목표'].map(h => (
                         <th key={h} className="px-4 py-2.5 text-left font-medium whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
                     {visible.length === 0 && (
-                      <tr><td colSpan={10} className="px-4 py-8 text-center text-gray-400">데이터 없음</td></tr>
+                      <tr><td colSpan={11} className="px-4 py-8 text-center text-gray-400">데이터 없음</td></tr>
                     )}
                     {visible.map(r => {
                       const ci    = getCurrentMonthIndex(r)
-                      const total = r.months.reduce((s, m) => s + m.activities.length, 0)
+                      const total = r.months.reduce((s, m) => s + countAllActivities(m), 0)
                       const valid = r.months.reduce((s, m) => s + countValidActivities(m), 0)
                       return (
                         <tr key={r.id} className="hover:bg-gray-50">
-                          <td className="px-4 py-2.5 font-medium">{r.mentorName}</td>
+                          <td className="px-4 py-2.5 font-medium whitespace-nowrap">{r.mentorName}</td>
                           <td className="px-4 py-2.5 text-gray-600">{r.menteeName}</td>
+                          <td className="px-4 py-2.5 text-gray-500 text-xs whitespace-nowrap">{r.joinDate}</td>
                           <td className="px-4 py-2.5 text-gray-500 text-xs whitespace-nowrap">
-                            {r.startDate}<br />{r.endDate}
+                            {fmtPeriodMonthly(r.startDate, r.endDate)}
                           </td>
                           <td className="px-4 py-2.5 whitespace-nowrap">
                             {ci === 0 ? '대기' : ci === 4 ? '종료' : `${ci}개월차`}
@@ -585,22 +598,23 @@ export default function AdminDashboard() {
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 text-gray-600">
                     <tr>
-                      {['멘토', '멘토 이메일', '멘티', '기간', '상태', '업로드', '목표', '메모', '관리'].map(h => (
+                      {['멘토', '멘토 이메일', '멘티', '입사일', '활동기간', '상태', '업로드', '목표', '메모', '관리'].map(h => (
                         <th key={h} className="px-4 py-2.5 text-left font-medium whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
                     {visible.length === 0 && (
-                      <tr><td colSpan={9} className="px-4 py-8 text-center text-gray-400">등록된 멘토링이 없습니다</td></tr>
+                      <tr><td colSpan={10} className="px-4 py-8 text-center text-gray-400">등록된 멘토링이 없습니다</td></tr>
                     )}
                     {visible.map(r => (
                       <tr key={r.id} className="hover:bg-gray-50 align-top">
                         <td className="px-4 py-3 font-medium whitespace-nowrap">{r.mentorName}</td>
                         <td className="px-4 py-3 text-gray-500 text-xs">{r.mentorEmail}</td>
                         <td className="px-4 py-3 whitespace-nowrap">{r.menteeName}</td>
+                        <td className="px-4 py-3 text-gray-500 text-xs whitespace-nowrap">{r.joinDate}</td>
                         <td className="px-4 py-3 text-gray-500 text-xs whitespace-nowrap">
-                          {r.startDate.slice(0, 7)} ~<br />{r.endDate.slice(0, 7)}
+                          {fmtPeriodMonthly(r.startDate, r.endDate)}
                         </td>
                         <td className="px-4 py-3">
                           <Chip label={STATUS_LABEL[r.status]} color={STATUS_COLOR[r.status]} />
@@ -770,11 +784,11 @@ export default function AdminDashboard() {
               </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-4">
+            {/* 정산 요약 카드 (유효활동 있는 건 제거) */}
+            <div className="grid grid-cols-2 gap-4">
               {[
                 { label: `${settlementYM} 정산 대상`, value: `${settlementRows.length}건`, color: 'text-blue-600' },
                 { label: `${settlementYM} 예상 지급액`, value: fmtAmount(settlementRows.reduce((s, r) => s + r.amount, 0)), color: 'text-green-600' },
-                { label: '유효 활동 있는 건', value: `${settlementRows.filter(r => r.valid > 0).length}건`, color: 'text-indigo-600' },
               ].map(c => (
                 <div key={c.label} className="bg-white rounded-lg border border-gray-200 p-4">
                   <div className="text-xs text-gray-500">{c.label}</div>
@@ -788,7 +802,7 @@ export default function AdminDashboard() {
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 text-gray-600">
                     <tr>
-                      {['멘토', '멘티', '개월차', '활동등록', '유효활동', '지급금액'].map(h => (
+                      {['멘토', '멘티', '개월차', '실제 사용금액', '지급 한도', '지급금액'].map(h => (
                         <th key={h} className="px-4 py-2.5 text-left font-medium whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
@@ -804,13 +818,9 @@ export default function AdminDashboard() {
                         <td className="px-4 py-3 font-medium">{row.record.mentorName}</td>
                         <td className="px-4 py-3">{row.record.menteeName}</td>
                         <td className="px-4 py-3 whitespace-nowrap">{row.monthIndex}개월차</td>
-                        <td className="px-4 py-3 text-center">{row.total} / 5회</td>
-                        <td className="px-4 py-3 text-center">
-                          <span className={row.valid >= 3 ? 'text-green-600 font-medium' : ''}>
-                            {row.valid >= 3 ? '3회 이상' : `${row.valid}회`}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 font-medium whitespace-nowrap">{fmtAmount(row.amount)}</td>
+                        <td className="px-4 py-3 whitespace-nowrap">{fmtAmount(row.actualCost)}</td>
+                        <td className="px-4 py-3 whitespace-nowrap">{fmtAmount(row.limit)}</td>
+                        <td className="px-4 py-3 font-medium whitespace-nowrap text-blue-700">{fmtAmount(row.amount)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -833,11 +843,13 @@ export default function AdminDashboard() {
               <h3 className="font-bold text-gray-800">{editingId ? '멘토링 편집' : '멘토링 추가'}</h3>
               <button onClick={() => setShowAddEdit(false)} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">×</button>
             </div>
-            <div className="px-6 py-5 space-y-4 max-h-[70vh] overflow-y-auto">
+            <div className="px-6 py-5 space-y-4 max-h-[75vh] overflow-y-auto">
+
+              {/* 멘토명 / 멘토 이메일 / 멘티명 */}
               {([
-                { key: 'mentorName' as const, label: '멘토명', req: true, type: 'text', placeholder: '홍길동' },
+                { key: 'mentorName'  as const, label: '멘토명',      req: true, type: 'text',  placeholder: '홍길동' },
                 { key: 'mentorEmail' as const, label: '멘토 이메일', req: true, type: 'email', placeholder: 'mentor@company.co.kr' },
-                { key: 'menteeName' as const, label: '멘티명', req: true, type: 'text', placeholder: '신입사원' },
+                { key: 'menteeName'  as const, label: '멘티명',      req: true, type: 'text',  placeholder: '신입사원' },
               ]).map(f => (
                 <div key={f.key}>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -850,18 +862,29 @@ export default function AdminDashboard() {
                 </div>
               ))}
 
+              {/* 입사일 (YYYY-MM-DD) */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  입사일 <span className="text-red-500">*</span>
+                  <span className="text-gray-400 font-normal ml-1">(일 단위 — 에스코트 안내 기준)</span>
+                </label>
+                <input type="date" value={form.joinDate}
+                  onChange={e => handleJoinDateChange(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
+              </div>
+
               {/* 입사월 + 자동 계산 기간 */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   입사월 <span className="text-red-500">*</span>
-                  <span className="text-gray-400 font-normal ml-1">(입사월 포함 3개월 자동 계산)</span>
+                  <span className="text-gray-400 font-normal ml-1">(입사일 입력 시 자동 설정 · 수동 조정 가능)</span>
                 </label>
                 <input type="month" value={form.joinMonth}
                   onChange={e => handleJoinMonthChange(e.target.value)}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300" />
                 {form.startDate && (
                   <p className="text-xs text-blue-600 mt-1 font-medium">
-                    자동 계산: {form.startDate.slice(0, 7)} ~ {form.endDate.slice(0, 7)}
+                    멘토링 활동 기간: {fmtPeriodMonthly(form.startDate, form.endDate)}
                   </p>
                 )}
               </div>
