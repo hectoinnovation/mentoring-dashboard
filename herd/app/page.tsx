@@ -811,55 +811,33 @@ export default function AdminDashboard() {
             <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
-                  <thead className="text-gray-600">
-                    <tr className="bg-gray-50 border-b border-gray-200">
-                      <th className="px-4 py-2.5 text-left font-medium whitespace-nowrap" rowSpan={2}>멘토</th>
-                      <th className="px-4 py-2.5 text-left font-medium whitespace-nowrap" rowSpan={2}>멘티</th>
-                      <th colSpan={3} className="px-4 py-2 text-center font-semibold text-blue-700 bg-blue-50 border-l border-blue-200 whitespace-nowrap">1개월차</th>
-                      <th colSpan={3} className="px-4 py-2 text-center font-semibold text-green-700 bg-green-50 border-l border-green-200 whitespace-nowrap">2개월차</th>
-                      <th colSpan={3} className="px-4 py-2 text-center font-semibold text-purple-700 bg-purple-50 border-l border-purple-200 whitespace-nowrap">3개월차</th>
-                    </tr>
-                    <tr className="bg-gray-50 border-b border-gray-200">
-                      {[
-                        { label: '활동수', cls: 'border-l border-blue-200 bg-blue-50 text-blue-600' },
-                        { label: '지급인정', cls: 'bg-blue-50 text-blue-600' },
-                        { label: '지급예상', cls: 'bg-blue-50 text-blue-600' },
-                        { label: '활동수', cls: 'border-l border-green-200 bg-green-50 text-green-600' },
-                        { label: '지급인정', cls: 'bg-green-50 text-green-600' },
-                        { label: '지급예상', cls: 'bg-green-50 text-green-600' },
-                        { label: '활동수', cls: 'border-l border-purple-200 bg-purple-50 text-purple-600' },
-                        { label: '지급인정', cls: 'bg-purple-50 text-purple-600' },
-                        { label: '지급예상', cls: 'bg-purple-50 text-purple-600' },
-                      ].map((h, i) => (
-                        <th key={i} className={`px-3 py-2 font-medium whitespace-nowrap text-xs ${h.cls}`}>{h.label}</th>
+                  <thead className="bg-gray-50 text-gray-600">
+                    <tr>
+                      {['멘토', '멘티', '차수', '활동수', '지급인정', '실사용금액', '최대한도', '지급예상'].map(h => (
+                        <th key={h} className="px-4 py-2.5 text-left font-medium whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
-                    {visible.length === 0 && (
-                      <tr><td colSpan={11} className="px-4 py-8 text-center text-gray-400">데이터 없음</td></tr>
+                    {settlementRows.length === 0 && (
+                      <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400">
+                        {settlementYM}에 해당하는 정산 데이터가 없습니다
+                      </td></tr>
                     )}
-                    {visible.map(r => {
-                      const m1 = r.months.find(m => m.monthIndex === 1)!
-                      const m2 = r.months.find(m => m.monthIndex === 2)!
-                      const m3 = r.months.find(m => m.monthIndex === 3)!
-                      const cellCls = 'px-3 py-2.5 text-center whitespace-nowrap'
+                    {settlementRows.map(row => {
+                      const md = row.record.months.find(m => m.monthIndex === row.monthIndex)
+                      const allActs   = md ? countAllActivities(md)   : 0
+                      const validActs = md ? countValidActivities(md) : 0
                       return (
-                        <tr key={r.id} className="hover:bg-gray-50">
-                          <td className="px-4 py-2.5 font-medium whitespace-nowrap">{r.mentorName}</td>
-                          <td className="px-4 py-2.5 text-gray-600 whitespace-nowrap">{r.menteeName}</td>
-                          {/* 1개월차 */}
-                          <td className={`${cellCls} border-l border-blue-100 text-gray-600`}>{countAllActivities(m1)}</td>
-                          <td className={`${cellCls} text-gray-600`}>{countValidActivities(m1)}</td>
-                          <td className={`${cellCls} font-medium text-blue-700`}>{fmtAmount(getMonthlyPayment(m1))}</td>
-                          {/* 2개월차 */}
-                          <td className={`${cellCls} border-l border-green-100 text-gray-600`}>{countAllActivities(m2)}</td>
-                          <td className={`${cellCls} text-gray-600`}>{countValidActivities(m2)}</td>
-                          <td className={`${cellCls} font-medium text-green-700`}>{fmtAmount(getMonthlyPayment(m2))}</td>
-                          {/* 3개월차 */}
-                          <td className={`${cellCls} border-l border-purple-100 text-gray-600`}>{countAllActivities(m3)}</td>
-                          <td className={`${cellCls} text-gray-600`}>{countValidActivities(m3)}</td>
-                          <td className={`${cellCls} font-medium text-purple-700`}>{fmtAmount(getMonthlyPayment(m3))}</td>
+                        <tr key={`${row.record.id}-${row.monthIndex}`} className="hover:bg-gray-50">
+                          <td className="px-4 py-3 font-medium whitespace-nowrap">{row.record.mentorName}</td>
+                          <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{row.record.menteeName}</td>
+                          <td className="px-4 py-3 whitespace-nowrap">{row.monthIndex}개월차</td>
+                          <td className="px-4 py-3 text-center">{allActs}</td>
+                          <td className="px-4 py-3 text-center font-medium">{validActs}</td>
+                          <td className="px-4 py-3 whitespace-nowrap text-gray-600">{fmtAmount(row.actualCost)}</td>
+                          <td className="px-4 py-3 whitespace-nowrap text-gray-600">{fmtAmount(row.limit)}</td>
+                          <td className="px-4 py-3 font-medium whitespace-nowrap text-blue-700">{fmtAmount(row.amount)}</td>
                         </tr>
                       )
                     })}

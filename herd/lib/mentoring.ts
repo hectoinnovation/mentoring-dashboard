@@ -468,11 +468,10 @@ export function generateInitialGuideMailHtml(record: MentoringRecord, link: stri
 </html>`
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function generateEndMailBody(record: MentoringRecord): string {
   return `안녕하세요.
 인재협업팀입니다.
-
-${record.mentorName}님
 
 이번 달 멘토링 활동 마감일이 다가와 활동 등록 및 증빙 자료 업로드 관련 안내드립니다.
 활동 등록 및 증빙 자료 업로드가 완료되지 않은 경우 지급 인정이 어려울 수 있으니 기간 내 등록 부탁드립니다.
@@ -484,17 +483,12 @@ ${record.mentorName}님
 
 ■ 지급 기준 안내
 
-  +---------------------------------------+
-  | [0~1회]    지급 없음                  |
-  +---------------------------------------+
-  | [2회]      최대 50,000원              |
-  +---------------------------------------+
-  | [3회 이상] 최대 100,000원            |
-  +---------------------------------------+
+- 0~1회: 지급 없음
+- 2회: 최대 50,000원
+- 3회 이상: 최대 100,000원
 
 단, 실제 사용금액이 지급 기준보다 적은 경우 실제 사용금액 기준으로 지급됩니다.
-
-  예: 실제 사용금액 96,000원 → 지급금액 96,000원
+예: 실제 사용금액 96,000원 → 지급금액 96,000원
 
 ■ 증빙 등록 안내
 
@@ -516,6 +510,7 @@ ${record.mentorName}님
 인재협업팀 드림`
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function generateEndMailHtml(record: MentoringRecord): string {
   return `<!DOCTYPE html>
 <html lang="ko">
@@ -536,7 +531,6 @@ export function generateEndMailHtml(record: MentoringRecord): string {
 
   <p style="margin:0 0 24px;font-size:15px;line-height:1.8;color:#374151;">
     안녕하세요.<br>인재협업팀입니다.<br><br>
-    <strong>${record.mentorName}님</strong><br>
     이번 달 멘토링 활동 마감일이 다가와 활동 등록 및 증빙 자료 업로드 관련 안내드립니다.<br>
     기간 내 미등록 건은 지급 인정이 어려울 수 있으니 기간 내 등록 부탁드립니다.
   </p>
