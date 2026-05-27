@@ -377,7 +377,7 @@ function MonthCard({ monthData, monthIndex, startDate, currentMonthIndex, upload
               </div>
             </div>
             <div className="text-right border-l border-gray-200 pl-3">
-              <div className="text-xs text-gray-400">지급 한도</div>
+              <div className="text-xs text-gray-400">최대 지급 가능 금액</div>
               <div className={`font-bold text-base ${limit > 0 ? 'text-amber-600' : 'text-gray-400'}`}>
                 {fmtAmount(limit)}
               </div>
@@ -691,10 +691,10 @@ export default function MentorPage() {
         <div className="bg-amber-50 border border-amber-200 rounded-xl px-5 py-3 text-sm text-amber-800">
           <p className="font-medium mb-1">💡 지급 기준</p>
           <ul className="text-xs space-y-0.5 text-amber-700">
-            <li>• 활동 사진이 있으면 인정 (비용 없는 경우)</li>
-            <li>• 비용이 있는 경우 사진 + 영수증 + 사용 금액 입력이 <strong>모두</strong> 있어야 유효</li>
-            <li>• 유효 2회: 50,000원 한도 / 3회 이상: 100,000원 한도</li>
-            <li>• <strong>최종 지급금액 = min(지급 한도, 실제 사용금액 합계)</strong></li>
+            <li>• 활동 사진이 있으면 지급 인정 활동으로 인정 (비용 없는 경우)</li>
+            <li>• 비용이 있는 경우 사진 + 영수증 + 사용 금액 입력이 <strong>모두</strong> 있어야 인정</li>
+            <li>• 지급 인정 활동 2회: 최대 50,000원 / 3회 이상: 최대 100,000원</li>
+            <li>• 실제 사용금액이 더 적으면 실제 사용금액 기준으로 지급</li>
             <li>• 총 최대 지급액: 300,000원 (3개월 합산)</li>
           </ul>
         </div>

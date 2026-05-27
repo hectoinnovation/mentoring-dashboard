@@ -429,9 +429,9 @@ export default function AdminDashboard() {
       입사일:        row.record.joinDate,
       활동월:        settlementYM,
       개월차:        `${row.monthIndex}개월차`,
-      실제사용금액:  row.actualCost,
-      지급한도:      row.limit,
-      최종지급금액:  row.amount,
+      실제사용금액:        row.actualCost,
+      최대지급가능금액:    row.limit,
+      최종지급금액:        row.amount,
     }))
     const ws = XLSX.utils.json_to_sheet(data)
     const wb = XLSX.utils.book_new()
@@ -528,7 +528,7 @@ export default function AdminDashboard() {
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 text-gray-600">
                     <tr>
-                      {['멘토', '멘티', '입사일', '활동기간', '진행월', '활동', '유효', '지급(예상)', '상태', '업로드', '목표'].map(h => (
+                      {['멘토', '멘티', '입사일', '활동기간', '진행월', '활동', '지급 인정', '지급(예상)', '상태', '업로드', '목표'].map(h => (
                         <th key={h} className="px-4 py-2.5 text-left font-medium whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
@@ -802,7 +802,7 @@ export default function AdminDashboard() {
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 text-gray-600">
                     <tr>
-                      {['멘토', '멘티', '개월차', '실제 사용금액', '지급 한도', '지급금액'].map(h => (
+                      {['멘토', '멘티', '개월차', '실제 사용금액', '최대 지급 가능 금액', '지급금액'].map(h => (
                         <th key={h} className="px-4 py-2.5 text-left font-medium whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
