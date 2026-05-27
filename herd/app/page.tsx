@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useMemo } from 'react'
-import * as XLSX from 'xlsx'
 import {
   MentoringRecord, MentoringStatus, UploadStatus, ApprovalStatus, PaymentStatus,
   INITIAL_DATA, createEmptyMonths, generateToken, TODAY,
@@ -359,7 +358,8 @@ export default function AdminDashboard() {
     )
   }
 
-  function downloadExcel() {
+  async function downloadExcel() {
+    const XLSX = await import('xlsx')
     const data = settlementRows.map(row => ({
       멘토명: row.record.mentorName,
       멘토이메일: row.record.mentorEmail,
