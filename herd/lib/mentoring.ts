@@ -342,9 +342,10 @@ ${link}
    단, 비용 사용이 있는 경우에는 영수증 업로드와 사용 금액 입력이 필요합니다.
 
    사진은 식사 활동뿐 아니라 채움·틔움·배움 프로그램 참여 사진, 사내 구성원 소개 및 교류 활동,
-   멘티 적응 지원 활동 등 멘토링 활동을 확인할 수 있는 내용이면 인정 가능합니다.
+   신규입사자 적응 지원 활동 등 멘토링 활동을 확인할 수 있는 내용이면 인정 가능합니다.
 
-감사합니다.`
+감사합니다.
+인재협업팀 드림`
 }
 
 export function generateInitialGuideMailHtml(record: MentoringRecord, link: string): string {
@@ -452,7 +453,7 @@ export function generateInitialGuideMailHtml(record: MentoringRecord, link: stri
   <p style="margin:0 0 6px;font-size:13px;color:#6b7280;">※ 활동 사진 등록 시 인정 · 비용 없는 활동도 인정 가능 · 비용 있는 경우 영수증+금액 입력 필수</p>
   <p style="margin:0 0 28px;font-size:13px;color:#6b7280;">※ 사진은 식사, 채움·틔움·배움 프로그램, 사내 교류 활동 등 멘토링 활동 확인 가능 내용이면 인정</p>
 
-  <p style="margin:0;font-size:14px;color:#374151;">감사합니다.<br><strong>인재협업팀</strong></p>
+  <p style="margin:0;font-size:14px;color:#374151;">감사합니다.<br><strong>인재협업팀 드림</strong></p>
 </td></tr>
 
 <!-- 푸터 -->
@@ -471,9 +472,9 @@ export function generateEndMailBody(record: MentoringRecord): string {
   return `안녕하세요.
 인재협업팀입니다.
 
-${record.mentorName}님, ${record.menteeName}님
+${record.mentorName}님
 
-이번 달 멘토링 활동 마감일이 다가와 활동 등록 및 증빙 자료 업로드를 안내드립니다.
+이번 달 멘토링 활동 마감일이 다가와 활동 등록 및 증빙 자료 업로드 관련 안내드립니다.
 활동 등록 및 증빙 자료 업로드가 완료되지 않은 경우 지급 인정이 어려울 수 있으니 기간 내 등록 부탁드립니다.
 
 ■ 활동 등록 마감 안내
@@ -503,7 +504,7 @@ ${record.mentorName}님, ${record.menteeName}님
 - 기간 내 미등록 건은 지급 인정이 어려울 수 있습니다.
 
 사진은 식사 활동뿐 아니라 채움·틔움·배움 프로그램 참여 사진, 사내 구성원 소개 및 교류 활동,
-멘티 적응 지원 활동 등 멘토링 활동을 확인할 수 있는 내용이면 인정 가능합니다.
+신규입사자 적응 지원 활동 등 멘토링 활동을 확인할 수 있는 내용이면 인정 가능합니다.
 
 ■ 활동비 지급 일정
 
@@ -511,7 +512,8 @@ ${record.mentorName}님, ${record.menteeName}님
 예: 5월 활동비는 6월 10일 지급
 단, 공휴일 또는 휴무일이 포함된 경우 지급일은 전후로 변동될 수 있습니다.
 
-감사합니다.`
+감사합니다.
+인재협업팀 드림`
 }
 
 export function generateEndMailHtml(record: MentoringRecord): string {
@@ -534,8 +536,8 @@ export function generateEndMailHtml(record: MentoringRecord): string {
 
   <p style="margin:0 0 24px;font-size:15px;line-height:1.8;color:#374151;">
     안녕하세요.<br>인재협업팀입니다.<br><br>
-    <strong>${record.mentorName}님</strong>, <strong>${record.menteeName}님</strong><br>
-    이번 달 멘토링 활동 마감일이 다가와 활동 등록 및 증빙 자료 업로드를 안내드립니다.<br>
+    <strong>${record.mentorName}님</strong><br>
+    이번 달 멘토링 활동 마감일이 다가와 활동 등록 및 증빙 자료 업로드 관련 안내드립니다.<br>
     기간 내 미등록 건은 지급 인정이 어려울 수 있으니 기간 내 등록 부탁드립니다.
   </p>
 
@@ -583,7 +585,7 @@ export function generateEndMailHtml(record: MentoringRecord): string {
   <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px;background:#faf5ff;border-left:4px solid #7c3aed;border-radius:0 8px 8px 0;">
     <tr><td style="padding:14px 18px;font-size:13px;color:#5b21b6;line-height:1.7;">
       사진 인정 범위: 식사 활동, 채움·틔움·배움 프로그램 참여, 사내 구성원 소개 및 교류 활동,<br>
-      멘티 적응 지원 활동 등 멘토링 활동을 확인할 수 있는 내용이면 인정 가능합니다.
+      신규입사자 적응 지원 활동 등 멘토링 활동을 확인할 수 있는 내용이면 인정 가능합니다.
     </td></tr>
   </table>
 
@@ -599,7 +601,7 @@ export function generateEndMailHtml(record: MentoringRecord): string {
     </td></tr>
   </table>
 
-  <p style="margin:0;font-size:14px;color:#374151;">감사합니다.<br><strong>인재협업팀</strong></p>
+  <p style="margin:0;font-size:14px;color:#374151;">감사합니다.<br><strong>인재협업팀 드림</strong></p>
 </td></tr>
 
 <!-- 푸터 -->

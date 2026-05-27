@@ -529,7 +529,7 @@ export default function AdminDashboard() {
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 text-gray-600">
                     <tr>
-                      {['멘토', '멘티', '입사일', '활동기간', '진행월', '활동', '지급 인정', '지급(예상)', '상태', '업로드', '진행현황'].map(h => (
+                      {['멘토', '멘티', '입사일', '활동기간', '진행월', '이번달 활동', '이번달 지급인정', '이번달 지급예상', '상태', '업로드', '진행현황'].map(h => (
                         <th key={h} className="px-4 py-2.5 text-left font-medium whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
@@ -539,9 +539,11 @@ export default function AdminDashboard() {
                       <tr><td colSpan={11} className="px-4 py-8 text-center text-gray-400">데이터 없음</td></tr>
                     )}
                     {visible.map(r => {
-                      const ci    = getCurrentMonthIndex(r)
-                      const total = r.months.reduce((s, m) => s + countAllActivities(m), 0)
-                      const valid = r.months.reduce((s, m) => s + countValidActivities(m), 0)
+                      const ci = getCurrentMonthIndex(r)
+                      const curMd = (ci >= 1 && ci <= 3) ? r.months.find(m => m.monthIndex === ci) ?? null : null
+                      const curTotal   = curMd ? countAllActivities(curMd)   : null
+                      const curValid   = curMd ? countValidActivities(curMd) : null
+                      const curPayment = curMd ? getMonthlyPayment(curMd)    : null
                       return (
                         <tr key={r.id} className="hover:bg-gray-50">
                           <td className="px-4 py-2.5 font-medium whitespace-nowrap">{r.mentorName}</td>
@@ -553,9 +555,15 @@ export default function AdminDashboard() {
                           <td className="px-4 py-2.5 whitespace-nowrap">
                             {ci === 0 ? '대기' : ci === 4 ? '종료' : `${ci}개월차`}
                           </td>
-                          <td className="px-4 py-2.5 text-center">{total}</td>
-                          <td className="px-4 py-2.5 text-center">{valid}</td>
-                          <td className="px-4 py-2.5 font-medium whitespace-nowrap">{fmtAmount(getTotalExpectedPayment(r))}</td>
+                          <td className="px-4 py-2.5 text-center text-gray-600">
+                            {curTotal !== null ? curTotal : <span className="text-gray-300">—</span>}
+                          </td>
+                          <td className="px-4 py-2.5 text-center text-gray-600">
+                            {curValid !== null ? curValid : <span className="text-gray-300">—</span>}
+                          </td>
+                          <td className="px-4 py-2.5 font-medium whitespace-nowrap">
+                            {curPayment !== null ? fmtAmount(curPayment) : <span className="text-gray-300">—</span>}
+                          </td>
                           <td className="px-4 py-2.5">
                             <Chip label={STATUS_LABEL[r.status]} color={STATUS_COLOR[r.status]} />
                           </td>
@@ -803,29 +811,58 @@ export default function AdminDashboard() {
             <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
-                  <thead className="bg-gray-50 text-gray-600">
-                    <tr>
-                      {['멘토', '멘티', '개월차', '실제 사용금액', '최대 지급 가능 금액', '지급금액'].map(h => (
-                        <th key={h} className="px-4 py-2.5 text-left font-medium whitespace-nowrap">{h}</th>
+                  <thead className="text-gray-600">
+                    <tr className="bg-gray-50 border-b border-gray-200">
+                      <th className="px-4 py-2.5 text-left font-medium whitespace-nowrap" rowSpan={2}>멘토</th>
+                      <th className="px-4 py-2.5 text-left font-medium whitespace-nowrap" rowSpan={2}>멘티</th>
+                      <th colSpan={3} className="px-4 py-2 text-center font-semibold text-blue-700 bg-blue-50 border-l border-blue-200 whitespace-nowrap">1개월차</th>
+                      <th colSpan={3} className="px-4 py-2 text-center font-semibold text-green-700 bg-green-50 border-l border-green-200 whitespace-nowrap">2개월차</th>
+                      <th colSpan={3} className="px-4 py-2 text-center font-semibold text-purple-700 bg-purple-50 border-l border-purple-200 whitespace-nowrap">3개월차</th>
+                    </tr>
+                    <tr className="bg-gray-50 border-b border-gray-200">
+                      {[
+                        { label: '활동수', cls: 'border-l border-blue-200 bg-blue-50 text-blue-600' },
+                        { label: '지급인정', cls: 'bg-blue-50 text-blue-600' },
+                        { label: '지급예상', cls: 'bg-blue-50 text-blue-600' },
+                        { label: '활동수', cls: 'border-l border-green-200 bg-green-50 text-green-600' },
+                        { label: '지급인정', cls: 'bg-green-50 text-green-600' },
+                        { label: '지급예상', cls: 'bg-green-50 text-green-600' },
+                        { label: '활동수', cls: 'border-l border-purple-200 bg-purple-50 text-purple-600' },
+                        { label: '지급인정', cls: 'bg-purple-50 text-purple-600' },
+                        { label: '지급예상', cls: 'bg-purple-50 text-purple-600' },
+                      ].map((h, i) => (
+                        <th key={i} className={`px-3 py-2 font-medium whitespace-nowrap text-xs ${h.cls}`}>{h.label}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
-                    {settlementRows.length === 0 && (
-                      <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">
-                        {settlementYM}에 해당하는 정산 데이터가 없습니다
-                      </td></tr>
+                    {visible.length === 0 && (
+                      <tr><td colSpan={11} className="px-4 py-8 text-center text-gray-400">데이터 없음</td></tr>
                     )}
-                    {settlementRows.map(row => (
-                      <tr key={`${row.record.id}-${row.monthIndex}`} className="hover:bg-gray-50">
-                        <td className="px-4 py-3 font-medium">{row.record.mentorName}</td>
-                        <td className="px-4 py-3">{row.record.menteeName}</td>
-                        <td className="px-4 py-3 whitespace-nowrap">{row.monthIndex}개월차</td>
-                        <td className="px-4 py-3 whitespace-nowrap">{fmtAmount(row.actualCost)}</td>
-                        <td className="px-4 py-3 whitespace-nowrap">{fmtAmount(row.limit)}</td>
-                        <td className="px-4 py-3 font-medium whitespace-nowrap text-blue-700">{fmtAmount(row.amount)}</td>
-                      </tr>
-                    ))}
+                    {visible.map(r => {
+                      const m1 = r.months.find(m => m.monthIndex === 1)!
+                      const m2 = r.months.find(m => m.monthIndex === 2)!
+                      const m3 = r.months.find(m => m.monthIndex === 3)!
+                      const cellCls = 'px-3 py-2.5 text-center whitespace-nowrap'
+                      return (
+                        <tr key={r.id} className="hover:bg-gray-50">
+                          <td className="px-4 py-2.5 font-medium whitespace-nowrap">{r.mentorName}</td>
+                          <td className="px-4 py-2.5 text-gray-600 whitespace-nowrap">{r.menteeName}</td>
+                          {/* 1개월차 */}
+                          <td className={`${cellCls} border-l border-blue-100 text-gray-600`}>{countAllActivities(m1)}</td>
+                          <td className={`${cellCls} text-gray-600`}>{countValidActivities(m1)}</td>
+                          <td className={`${cellCls} font-medium text-blue-700`}>{fmtAmount(getMonthlyPayment(m1))}</td>
+                          {/* 2개월차 */}
+                          <td className={`${cellCls} border-l border-green-100 text-gray-600`}>{countAllActivities(m2)}</td>
+                          <td className={`${cellCls} text-gray-600`}>{countValidActivities(m2)}</td>
+                          <td className={`${cellCls} font-medium text-green-700`}>{fmtAmount(getMonthlyPayment(m2))}</td>
+                          {/* 3개월차 */}
+                          <td className={`${cellCls} border-l border-purple-100 text-gray-600`}>{countAllActivities(m3)}</td>
+                          <td className={`${cellCls} text-gray-600`}>{countValidActivities(m3)}</td>
+                          <td className={`${cellCls} font-medium text-purple-700`}>{fmtAmount(getMonthlyPayment(m3))}</td>
+                        </tr>
+                      )
+                    })}
                   </tbody>
                 </table>
               </div>
