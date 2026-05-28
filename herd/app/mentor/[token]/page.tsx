@@ -1004,14 +1004,22 @@ export default function MentorPage() {
 
         {/* 지급 기준 안내 */}
         <div className="bg-amber-50 border border-amber-200 rounded-xl px-5 py-3 text-sm text-amber-800">
-          <p className="font-medium mb-1">💡 지급 기준</p>
-          <ul className="text-xs space-y-0.5 text-amber-700">
-            <li>• 활동 사진이 있으면 지급 인정 활동으로 인정 (비용 없는 경우)</li>
-            <li>• 비용이 있는 경우 사진 + 영수증 + 사용 금액 입력이 <strong>모두</strong> 있어야 인정</li>
-            <li>• 지급 인정 활동 2회: 최대 50,000원 / 3회 이상: 최대 100,000원</li>
-            <li>• 실제 사용금액이 더 적으면 실제 사용금액 기준으로 지급</li>
-            <li>• 총 최대 지급액: 300,000원 (3개월 합산)</li>
+          <p className="font-medium mb-2">💡 지급 기준</p>
+          <ul className="text-xs space-y-1 text-amber-700">
+            <li>• 활동 사진이 있으면 지급 인정 활동으로 인정됩니다.</li>
+            <li>• 비용 없는 활동도 유효 활동으로 인정되지만, 실제 사용금액이 없으면 지급액은 0원입니다.</li>
+            <li>• 비용이 있는 활동은 사진 + 영수증 + 사용 금액이 <strong>모두</strong> 있어야 인정됩니다.</li>
+            <li>• 지급 한도는 인정 활동 횟수 기준으로 산정됩니다.
+              <span className="block ml-2 mt-0.5">0~1회: 지급 없음 &nbsp;|&nbsp; 2회: 최대 50,000원 &nbsp;|&nbsp; 3회 이상: 최대 100,000원</span>
+            </li>
+            <li>• 최종 지급액은 지급 한도와 실제 사용금액 중 더 낮은 금액으로 지급됩니다.</li>
           </ul>
+          <div className="text-xs text-amber-600 mt-2 space-y-0.5 border-t border-amber-200 pt-2">
+            <p className="font-medium">예)</p>
+            <p>· 인정 3회 + 실사용 30,000원 → 30,000원 지급</p>
+            <p>· 인정 3회 + 실사용 120,000원 → 100,000원 지급 (한도 적용)</p>
+            <p>· 인정 3회 + 비용 사용 없음 → 지급 없음</p>
+          </div>
         </div>
 
         {/* 월별 카드 */}

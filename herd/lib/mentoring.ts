@@ -477,7 +477,8 @@ export function generateInitialGuideMailHtml(record: MentoringRecord, link: stri
       <p style="margin:0;font-size:13px;color:#92400e;">· 활동 3회 + 비용 사용 없음 → 지급 없음</p>
     </td></tr>
   </table>
-  <p style="margin:0 0 6px;font-size:13px;color:#6b7280;">※ 활동 사진 등록 시 인정 · 비용 없는 활동도 인정 가능 · 비용 있는 경우 영수증+금액 입력 필수</p>
+  <p style="margin:0 0 4px;font-size:13px;color:#6b7280;">※ 활동 사진 등록 시 인정 · 비용 없는 활동도 활동 횟수에는 인정되지만 실제 지급액은 발생하지 않음</p>
+  <p style="margin:0 0 4px;font-size:13px;color:#6b7280;">※ 비용 있는 경우 영수증 업로드 + 사용 금액 입력 필수 · 최종 지급액은 실제 사용금액 기준으로 지급</p>
   <p style="margin:0 0 28px;font-size:13px;color:#6b7280;">※ 사진은 식사 활동뿐 아니라 채움·틔움·배움 공간(회사 식당·카페·도서관) 이용, 사내 구성원 소개 및 교류 활동, 신규입사자 적응 지원 활동 등 멘토링 활동 확인 가능 내용이면 인정</p>
 
   <p style="margin:0;font-size:14px;color:#374151;">감사합니다.<br><strong>인재협업팀 드림</strong></p>
@@ -611,8 +612,9 @@ export function generateEndMailHtml(record: MentoringRecord): string {
   <h2 style="margin:0 0 14px;font-size:15px;font-weight:700;color:#1e3a8a;border-bottom:2px solid #dbeafe;padding-bottom:8px;">■ 증빙 등록 안내</h2>
   <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px;">
     <tr><td style="padding:4px 0;font-size:14px;color:#374151;">· 활동 사진 등록 시 활동 인정 가능합니다.</td></tr>
-    <tr><td style="padding:4px 0;font-size:14px;color:#374151;">· 비용 사용이 없는 활동도 인정 가능합니다.</td></tr>
+    <tr><td style="padding:4px 0;font-size:14px;color:#374151;">· 비용 없는 활동도 활동 횟수에는 인정되지만, 실제 지급액은 발생하지 않습니다.</td></tr>
     <tr><td style="padding:4px 0;font-size:14px;color:#374151;">· 비용 사용이 있는 경우 영수증 업로드와 사용 금액 입력이 필요합니다.</td></tr>
+    <tr><td style="padding:4px 0;font-size:14px;color:#374151;">· 최종 지급액은 실제 사용금액 기준으로 지급됩니다.</td></tr>
     <tr><td style="padding:4px 0;font-size:14px;color:#dc2626;font-weight:600;">· 기간 내 미등록 건은 지급 인정이 어려울 수 있습니다.</td></tr>
   </table>
   <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px;background:#faf5ff;border-left:4px solid #7c3aed;border-radius:0 8px 8px 0;">
