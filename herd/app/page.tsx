@@ -346,7 +346,7 @@ export default function AdminDashboard() {
         } : r))
       } else {
         const newRecord: MentoringRecord = {
-          id: Date.now().toString(),
+          id: crypto.randomUUID(),
           mentorName: form.mentorName, mentorEmail: form.mentorEmail,
           menteeName: form.menteeName,
           joinDate: form.joinDate,

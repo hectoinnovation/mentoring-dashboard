@@ -767,7 +767,7 @@ export default function MentorPage() {
 
   async function addActivity(monthIndex: 1 | 2 | 3, entry: Omit<ActivityEntry, 'id'>, photoFile: File, receiptFile?: File) {
     if (!record) return
-    const tempId = `act_${Date.now()}`
+    const tempId = crypto.randomUUID()
     const fullEntry: ActivityEntry = { id: tempId, ...entry }
     const saved = await dbInsertActivity(record.id, monthIndex, fullEntry, photoFile, receiptFile)
     setRecord(prev => {

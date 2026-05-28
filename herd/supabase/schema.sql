@@ -4,8 +4,7 @@
 -- ─────────────────────────────────────────────────────────────────────────────
 
 -- ══════════════════════════════════════════════════════════════════════════════
--- 1. mentoring_pairs — 누락 컬럼 추가
---    ADD COLUMN IF NOT EXISTS: 이미 있는 컬럼은 무시
+-- 1. mentoring_pairs — 누락 컬럼 추가 (ADD COLUMN IF NOT EXISTS)
 -- ══════════════════════════════════════════════════════════════════════════════
 alter table public.mentoring_pairs
   add column if not exists mentor_name          text    not null default '',
@@ -32,7 +31,7 @@ alter table public.mentoring_pairs
   add column if not exists created_at           text,
   add column if not exists deleted_at           text;
 
--- token unique constraint (중복 방지)
+-- token unique constraint (없을 때만 추가)
 do $$ begin
   if not exists (
     select 1 from pg_constraint
@@ -46,11 +45,28 @@ do $$ begin
 end $$;
 
 -- ══════════════════════════════════════════════════════════════════════════════
--- 2. activities — 신규 생성 (이미 존재하면 무시)
+-- 2. activities — 타입 불일치 시 재생성
+--    mentor_id 가 text 로 생성되어 있으면 DROP 후 올바른 uuid 타입으로 재생성
+--    (mentoring_pairs.id 는 uuid 타입)
 -- ══════════════════════════════════════════════════════════════════════════════
+
+-- mentor_id 컬럼이 text 타입인 경우 테이블 전체 삭제 (데이터 없음 가정)
+do $$ begin
+  if exists (
+    select 1 from information_schema.columns
+    where table_schema = 'public'
+      and table_name   = 'activities'
+      and column_name  = 'mentor_id'
+      and data_type    = 'text'
+  ) then
+    drop table public.activities cascade;
+  end if;
+end $$;
+
+-- activities 테이블 생성 (없으면 생성, 있으면 skip)
 create table if not exists public.activities (
   id            text        primary key,
-  mentor_id     text        not null references public.mentoring_pairs(id) on delete cascade,
+  mentor_id     uuid        not null references public.mentoring_pairs(id) on delete cascade,
   month_index   integer     not null check (month_index in (1, 2, 3)),
   activity_date text        not null,
   content       text        not null default '',
@@ -65,14 +81,13 @@ create table if not exists public.activities (
 );
 
 -- ══════════════════════════════════════════════════════════════════════════════
--- 3. RLS 활성화
---    이미 활성화된 테이블은 skip (재실행 시 자동 policy 재생성 방지)
+-- 3. RLS 활성화 (이미 활성화된 경우 skip → Supabase 자동 policy 재생성 방지)
 -- ══════════════════════════════════════════════════════════════════════════════
 do $$ begin
   if not (
     select relrowsecurity from pg_class
-    where relname = 'mentoring_pairs'
-      and relnamespace = (select oid from pg_namespace where nspname = 'public')
+    where relname        = 'mentoring_pairs'
+      and relnamespace   = (select oid from pg_namespace where nspname = 'public')
   ) then
     execute 'alter table public.mentoring_pairs enable row level security';
   end if;
@@ -81,8 +96,8 @@ end $$;
 do $$ begin
   if not (
     select relrowsecurity from pg_class
-    where relname = 'activities'
-      and relnamespace = (select oid from pg_namespace where nspname = 'public')
+    where relname        = 'activities'
+      and relnamespace   = (select oid from pg_namespace where nspname = 'public')
   ) then
     execute 'alter table public.activities enable row level security';
   end if;
@@ -90,29 +105,25 @@ end $$;
 
 -- ══════════════════════════════════════════════════════════════════════════════
 -- 4. Policy 재설정 — DROP IF EXISTS → CREATE
---    중복 오류 근본 해결: 기존 policy를 먼저 삭제 후 재생성
---    mentor_read_own_pair 포함 모든 기존 policy를 안전하게 정리
+--    mentor_read_own_pair 포함 기존 policy 전부 삭제 후 재생성
 -- ══════════════════════════════════════════════════════════════════════════════
 
--- mentoring_pairs: 기존 policy 전체 정리 (어떤 이름이든 안전하게 삭제)
+-- mentoring_pairs
 drop policy if exists "mentor_read_own_pair"       on public.mentoring_pairs;
 drop policy if exists "allow_all_mentoring_pairs"  on public.mentoring_pairs;
 drop policy if exists "mentoring_pairs_policy"     on public.mentoring_pairs;
 drop policy if exists "enable_all_for_anon"        on public.mentoring_pairs;
 
--- mentoring_pairs: 내부 관리 도구용 전체 허용 policy 생성
 create policy "allow_all_mentoring_pairs"
   on public.mentoring_pairs
   for all
   using  (true)
   with check (true);
 
--- activities: 기존 policy 정리
-drop policy if exists "allow_all_activities"       on public.activities;
-drop policy if exists "activities_policy"          on public.activities;
-drop policy if exists "enable_all_for_anon"        on public.activities;
+-- activities
+drop policy if exists "allow_all_activities"  on public.activities;
+drop policy if exists "activities_policy"     on public.activities;
 
--- activities: 전체 허용 policy 생성
 create policy "allow_all_activities"
   on public.activities
   for all
@@ -120,13 +131,12 @@ create policy "allow_all_activities"
   with check (true);
 
 -- ══════════════════════════════════════════════════════════════════════════════
--- 5. Storage bucket (mentoring-files)
+-- 5. Storage bucket + policy
 -- ══════════════════════════════════════════════════════════════════════════════
 insert into storage.buckets (id, name, public)
   values ('mentoring-files', 'mentoring-files', true)
   on conflict (id) do nothing;
 
--- Storage policy: DROP IF EXISTS → CREATE
 drop policy if exists "allow_all_mentoring_storage" on storage.objects;
 
 create policy "allow_all_mentoring_storage"
