@@ -1251,7 +1251,6 @@ export default function AdminDashboard() {
         const isInitial = bulkConfirmType === 'initial'
         const withEmail = bulkConfirmTargets.filter(r => r.mentorEmail.trim())
         const noEmail   = bulkConfirmTargets.filter(r => !r.mentorEmail.trim())
-        const cc        = mailCc.trim() || 'inno_hm@hecto.co.kr'
         return (
           <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
             <div className="bg-white rounded-xl w-full max-w-md shadow-2xl flex flex-col max-h-[85vh]">
@@ -1269,12 +1268,17 @@ export default function AdminDashboard() {
               </div>
               {/* Body */}
               <div className="px-6 py-4 overflow-y-auto flex-1">
-                {!isInitial && (
-                  <div className="mb-3 flex items-center gap-2 text-sm">
-                    <span className="font-medium text-gray-500 w-6 flex-shrink-0">CC</span>
-                    <span className="text-gray-700 break-all">{cc}</span>
-                  </div>
-                )}
+                <div className="mb-4">
+                  <label className="block text-xs font-medium text-gray-500 mb-1">참조(CC)</label>
+                  <input
+                    type="text"
+                    value={mailCc}
+                    onChange={e => setMailCc(e.target.value)}
+                    placeholder="inno_hm@hecto.co.kr"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+                  />
+                  <p className="text-xs text-gray-400 mt-1">기본값: inno_hm@hecto.co.kr · 쉼표로 여러 명 입력 가능</p>
+                </div>
                 <div className="flex items-center gap-2 mb-3">
                   <span className="text-sm font-medium text-gray-700">
                     {isInitial
