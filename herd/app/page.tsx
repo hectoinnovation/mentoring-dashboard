@@ -238,6 +238,7 @@ export default function AdminDashboard() {
 
   // ── settlement
   const [settlementYM, setSettlementYM] = useState(TODAY.slice(0, 7))
+  const [zipLoading, setZipLoading]     = useState(false)
 
   // ─────────────────────────────────────────────────────────────────────────
   // Derived
@@ -554,8 +555,103 @@ export default function AdminDashboard() {
     XLSX.writeFile(wb, `멘토링정산_${settlementYM}.xlsx`)
   }
 
-  function downloadReceiptZip() {
-    alert('영수증 ZIP 다운로드는 Supabase Storage 연동 후 제공됩니다.\n엑셀에서 영수증 파일명을 확인하세요.')
+  async function downloadReceiptZip() {
+    // ─── 1. 대상 활동 수집 (receipt_url 있는 활동만) ──────────────────────
+    interface ReceiptItem {
+      mentorName:   string
+      menteeName:   string
+      monthIndex:   number
+      activityNum:  number   // 해당 월 내 활동 순서 (날짜 오름차순)
+      activityDate: string
+      costAmount:   number
+      receiptName:  string
+      receiptUrl:   string
+    }
+
+    const items: ReceiptItem[] = []
+
+    for (const row of settlementRows) {
+      const md = row.record.months.find(m => m.monthIndex === row.monthIndex)
+      if (!md) continue
+
+      // 활동 날짜 오름차순 (같은 날짜면 배열 원래 순서=created_at 순 유지)
+      const sorted = [...md.activities].sort((a, b) =>
+        a.activityDate.localeCompare(b.activityDate)
+      )
+
+      sorted.forEach((act, idx) => {
+        if (!act.receiptUrl) return
+        items.push({
+          mentorName:   row.record.mentorName,
+          menteeName:   row.record.menteeName,
+          monthIndex:   row.monthIndex,
+          activityNum:  idx + 1,
+          activityDate: act.activityDate,
+          costAmount:   act.costAmount,
+          receiptName:  act.receiptName || 'receipt',
+          receiptUrl:   act.receiptUrl,
+        })
+      })
+    }
+
+    if (items.length === 0) {
+      alert('다운로드할 영수증이 없습니다.')
+      return
+    }
+
+    setZipLoading(true)
+    try {
+      const JSZip = (await import('jszip')).default
+      const zip   = new JSZip()
+
+      // ─── 2. 고유 파일명 생성 ────────────────────────────────────────────
+      const getUniqueName = (base: string, used: Map<string, number>): string => {
+        const count = used.get(base) ?? 0
+        used.set(base, count + 1)
+        if (count === 0) return base
+        const dot = base.lastIndexOf('.')
+        return dot === -1
+          ? `${base}(${count})`
+          : `${base.slice(0, dot)}(${count})${base.slice(dot)}`
+      }
+
+      const usedNames = new Map<string, number>()
+
+      const namedItems = items.map(item => {
+        const baseName =
+          `${item.mentorName}_${item.menteeName}_${settlementYM}` +
+          `_${item.monthIndex}개월차_활동${item.activityNum}` +
+          `_${item.activityDate}_${item.costAmount}원_${item.receiptName}`
+        return { ...item, fileName: getUniqueName(baseName, usedNames) }
+      })
+
+      // ─── 3. 병렬 fetch → ZIP 추가 ──────────────────────────────────────
+      const blobs = await Promise.all(
+        namedItems.map(item =>
+          fetch(item.receiptUrl).then(res => {
+            if (!res.ok) throw new Error(`fetch failed: ${item.receiptUrl}`)
+            return res.blob()
+          })
+        )
+      )
+      namedItems.forEach((item, i) => zip.file(item.fileName, blobs[i]))
+
+      // ─── 4. 브라우저 다운로드 ──────────────────────────────────────────
+      const zipBlob = await zip.generateAsync({ type: 'blob' })
+      const url     = URL.createObjectURL(zipBlob)
+      const a       = document.createElement('a')
+      a.href        = url
+      a.download    = `mentoring-receipts_${settlementYM}.zip`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      console.error('[downloadReceiptZip]', err)
+      alert('영수증 ZIP 다운로드 중 오류가 발생했습니다.')
+    } finally {
+      setZipLoading(false)
+    }
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -830,9 +926,9 @@ export default function AdminDashboard() {
                   className="bg-green-600 text-white px-4 py-1.5 rounded-lg text-sm font-medium hover:bg-green-700 whitespace-nowrap">
                   엑셀 다운로드
                 </button>
-                <button onClick={downloadReceiptZip}
-                  className="bg-gray-200 text-gray-700 px-4 py-1.5 rounded-lg text-sm font-medium hover:bg-gray-300 whitespace-nowrap">
-                  영수증 ZIP
+                <button onClick={downloadReceiptZip} disabled={zipLoading}
+                  className="bg-gray-200 text-gray-700 px-4 py-1.5 rounded-lg text-sm font-medium hover:bg-gray-300 whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed">
+                  {zipLoading ? 'ZIP 생성 중...' : '영수증 ZIP'}
                 </button>
               </div>
             </div>
