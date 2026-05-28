@@ -132,19 +132,24 @@ export function fmtPeriodMonthly(startDate: string, endDate: string): string {
 // ─────────────────────────────────────────────────────────────────────────────
 // 활동 인정 기준
 //
-//  사진 있음 + 비용 없음                             → 인정 (사용금액 합계 미포함)
-//  사진 있음 + 비용 있음 + 영수증 있음 + 금액 > 0    → 인정 (사용금액 합계 포함)
-//  그 외 (사진 없음 / 영수증 없음 / 금액 0·미입력)   → 미인정
+//  지급인정(countValidActivities):
+//    사진 있음 + 비용 있음 + 영수증 있음 + 금액 > 0  → 인정 (사용금액 합계 포함)
+//    사진만 등록 / 비용 없음 / 금액 0 / 영수증 없음  → 미인정 (지급 기준 제외)
+//
+//  활동수(countAllActivities):
+//    멘토가 등록한 모든 활동 — 사진만 등록 포함
 //
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** 유효 활동 수 */
+/**
+ * 지급인정 활동 수
+ * 사진 + 비용 + 영수증 + 금액 > 0 을 모두 만족해야 1회 인정
+ * 사진만 등록된 활동은 0회 처리
+ */
 export function countValidActivities(monthData: MonthData): number {
-  return monthData.activities.filter(a => {
-    if (!a.photoName) return false
-    if (!a.hasCost)   return true
-    return !!a.receiptName && a.costAmount > 0
-  }).length
+  return monthData.activities.filter(a =>
+    !!a.photoName && a.hasCost && !!a.receiptName && a.costAmount > 0
+  ).length
 }
 
 /** 전체 등록 활동 수 (유효 여부 무관) */
@@ -194,6 +199,12 @@ export function fmtAmount(n: number): string {
 // 진행현황 배지
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * 진행현황 배지 — 활동 등록 여부 기준 (지급인정 여부와 무관)
+ *
+ * "완료" 기준: 해당 월에 활동이 1건 이상 등록된 경우 (사진만 포함)
+ * "미제출" 기준: 해당 월이 종료됐는데 활동이 없는 경우
+ */
 export function getMentoringProgress(record: MentoringRecord): ProgressBadge[] {
   if (record.status === 'suspended')
     return [{ text: '중단', color: 'bg-yellow-100 text-yellow-700' }]
@@ -201,34 +212,34 @@ export function getMentoringProgress(record: MentoringRecord): ProgressBadge[] {
   const ci = getCurrentMonthIndex(record)
   if (ci === 0) return [{ text: '대기', color: 'bg-gray-100 text-gray-500' }]
 
-  // 기간 종료
+  // 기간 종료 (ci === 4)
   if (ci === 4) {
-    const allComplete = record.months.every(m => countValidActivities(m) >= 1)
+    const allComplete = record.months.every(m => countAllActivities(m) > 0)
     if (allComplete) return [{ text: '전체 완료', color: 'bg-blue-100 text-blue-700' }]
-    return record.months.map(m => {
-      const v = countValidActivities(m)
-      return v >= 1
+    return record.months.map(m =>
+      countAllActivities(m) > 0
         ? { text: `${m.monthIndex}차 완료`,      color: 'bg-blue-100 text-blue-700' }
         : { text: `${m.monthIndex}차 미제출 마감`, color: 'bg-red-100 text-red-600' }
-    })
+    )
   }
 
-  // ci = 1, 2, 3
+  // ci = 1, 2, 3 — 진행 중
   const completedNums: number[] = []
   const unsubBadges: ProgressBadge[] = []
 
   for (let mi = 1; mi <= 3; mi++) {
     const md = record.months.find(m => m.monthIndex === mi)!
     if (mi < ci) {
-      if (countValidActivities(md) >= 1) {
+      // 지난 달: 활동 등록 여부로 완료 판단
+      if (countAllActivities(md) > 0) {
         completedNums.push(mi)
       } else {
         const { end } = getMonthPeriod(record.startDate, mi)
         const [y, mo] = end.split('-').map(Number)
-        const nm = mo === 12 ? 1 : mo + 1
-        const ny = mo === 12 ? y + 1 : y
+        const nm      = mo === 12 ? 1 : mo + 1
+        const ny      = mo === 12 ? y + 1 : y
         const deadline = `${ny}-${String(nm).padStart(2, '0')}-02`
-        const overdue = TODAY >= deadline
+        const overdue  = TODAY >= deadline
         unsubBadges.push({
           text:  `${mi}차 미제출${overdue ? ' 마감' : ''}`,
           color: overdue ? 'bg-red-100 text-red-600' : 'bg-gray-100 text-gray-500',
@@ -236,11 +247,6 @@ export function getMentoringProgress(record: MentoringRecord): ProgressBadge[] {
       }
     }
   }
-
-  const currentMd      = record.months.find(m => m.monthIndex === ci)
-  const currentComplete = (currentMd ? countValidActivities(currentMd) : 0) >= 3
-
-  if (currentComplete) completedNums.push(ci)
 
   if (completedNums.length === 3)
     return [{ text: '전체 완료', color: 'bg-blue-100 text-blue-700' }]
@@ -253,8 +259,8 @@ export function getMentoringProgress(record: MentoringRecord): ProgressBadge[] {
     result.push({ text: label, color: 'bg-blue-100 text-blue-700' })
   }
   result.push(...unsubBadges)
-  if (!currentComplete)
-    result.push({ text: `${ci}차 진행중`, color: 'bg-green-100 text-green-700' })
+  // 현재 진행 중인 월은 항상 "N차 진행중" 표시
+  result.push({ text: `${ci}차 진행중`, color: 'bg-green-100 text-green-700' })
 
   return result
 }

@@ -5,10 +5,10 @@ import {
   MentoringRecord, MentoringStatus, UploadStatus, MentoringGoals, MonthData,
   INITIAL_DATA, createEmptyMonths, createEmptyGoals, generateToken,
   calcDatesFromJoinMonth, fmtPeriodMonthly, TODAY,
-  getMonthYM, getCurrentMonthIndex, getMonthDataForYM,
+  getMonthYM,
   countValidActivities, countAllActivities,
   getMonthlyPayment, getMonthActualCost, getMonthPaymentLimit,
-  getTotalExpectedPayment, fmtAmount,
+  fmtAmount,
   generateInitialGuideMailHtml, generateEndMailHtml,
   sendInitialGuideMail, sendEndMail,
   getMentoringProgress,
@@ -18,7 +18,7 @@ import {
 // Constants & helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-type Tab = 'overview' | 'manage' | 'mail' | 'settlement'
+type Tab = 'manage' | 'mail' | 'settlement'
 
 const STATUS_LABEL: Record<MentoringStatus, string> = {
   active: '진행중', completed: '완료', suspended: '중단', deleted: '삭제',
@@ -52,22 +52,22 @@ type FormState = ReturnType<typeof blankForm>
 // 계산 예시 데이터 (지급 로직 검증용)
 // ─────────────────────────────────────────────────────────────────────────────
 
+// 계산 예시 — 새 지급인정 기준(사진+비용+영수증만 인정) 검증용
 const SETTLEMENT_EXAMPLES: { label: string; desc: string; md: MonthData }[] = [
   {
     label: '예시A',
-    desc: '사진+비용 1회(30,000원) + 사진만 2회 → 한도 100,000원',
+    desc: '사진+비용 2회(각 30,000원) → 지급인정 2, 한도 50,000원, 실사용 60,000원 → 지급 50,000원',
     md: {
-      monthIndex: 3,
+      monthIndex: 2,
       activities: [
-        { id:'ex-a-1', activityDate:'2026-01-05', content:'활동', memo:'', photoName:'photo.jpg', photoUrl:'', hasCost:true,  costAmount:30000, receiptName:'receipt.jpg', receiptUrl:'' },
-        { id:'ex-a-2', activityDate:'2026-01-12', content:'활동', memo:'', photoName:'photo.jpg', photoUrl:'', hasCost:false, costAmount:0,     receiptName:'',           receiptUrl:'' },
-        { id:'ex-a-3', activityDate:'2026-01-19', content:'활동', memo:'', photoName:'photo.jpg', photoUrl:'', hasCost:false, costAmount:0,     receiptName:'',           receiptUrl:'' },
+        { id:'ex-a-1', activityDate:'2026-01-05', content:'활동', memo:'', photoName:'photo.jpg', photoUrl:'', hasCost:true, costAmount:30000, receiptName:'receipt.jpg', receiptUrl:'' },
+        { id:'ex-a-2', activityDate:'2026-01-12', content:'활동', memo:'', photoName:'photo.jpg', photoUrl:'', hasCost:true, costAmount:30000, receiptName:'receipt.jpg', receiptUrl:'' },
       ],
     },
   },
   {
     label: '예시B',
-    desc: '비용 3회 합계 120,000원 → 한도 100,000원으로 상한 적용',
+    desc: '사진+비용 3회 합계 120,000원 → 지급인정 3, 한도 100,000원으로 상한 적용',
     md: {
       monthIndex: 3,
       activities: [
@@ -79,18 +79,18 @@ const SETTLEMENT_EXAMPLES: { label: string; desc: string; md: MonthData }[] = [
   },
   {
     label: '예시C',
-    desc: '사진+비용 1회(30,000원) + 사진만 1회 → 한도 50,000원',
+    desc: '사진+비용 2회(각 15,000원) → 지급인정 2, 한도 50,000원, 실사용 30,000원 → 지급 30,000원',
     md: {
       monthIndex: 2,
       activities: [
-        { id:'ex-c-1', activityDate:'2026-01-05', content:'활동', memo:'', photoName:'photo.jpg', photoUrl:'', hasCost:true,  costAmount:30000, receiptName:'receipt.jpg', receiptUrl:'' },
-        { id:'ex-c-2', activityDate:'2026-01-12', content:'활동', memo:'', photoName:'photo.jpg', photoUrl:'', hasCost:false, costAmount:0,     receiptName:'',           receiptUrl:'' },
+        { id:'ex-c-1', activityDate:'2026-01-05', content:'활동', memo:'', photoName:'photo.jpg', photoUrl:'', hasCost:true, costAmount:15000, receiptName:'receipt.jpg', receiptUrl:'' },
+        { id:'ex-c-2', activityDate:'2026-01-12', content:'활동', memo:'', photoName:'photo.jpg', photoUrl:'', hasCost:true, costAmount:15000, receiptName:'receipt.jpg', receiptUrl:'' },
       ],
     },
   },
   {
     label: '예시D',
-    desc: '사진만 3회 (비용 없음) → 실사용 0원이므로 지급 0원',
+    desc: '사진만 3회 (비용 없음) → 지급인정 0, 한도 0원, 지급 0원',
     md: {
       monthIndex: 3,
       activities: [
@@ -102,11 +102,13 @@ const SETTLEMENT_EXAMPLES: { label: string; desc: string; md: MonthData }[] = [
   },
   {
     label: '예시E',
-    desc: '사진+비용 1회(30,000원) → 인정 1회로 한도 0원, 지급 0원',
+    desc: '사진+비용 1회(30,000원) + 사진만 2회 → 지급인정 1, 한도 0원 (2회 미만), 지급 0원',
     md: {
-      monthIndex: 1,
+      monthIndex: 3,
       activities: [
-        { id:'ex-e-1', activityDate:'2026-01-05', content:'활동', memo:'', photoName:'photo.jpg', photoUrl:'', hasCost:true, costAmount:30000, receiptName:'receipt.jpg', receiptUrl:'' },
+        { id:'ex-e-1', activityDate:'2026-01-05', content:'활동', memo:'', photoName:'photo.jpg', photoUrl:'', hasCost:true,  costAmount:30000, receiptName:'receipt.jpg', receiptUrl:'' },
+        { id:'ex-e-2', activityDate:'2026-01-12', content:'활동', memo:'', photoName:'photo.jpg', photoUrl:'', hasCost:false, costAmount:0,     receiptName:'',           receiptUrl:'' },
+        { id:'ex-e-3', activityDate:'2026-01-19', content:'활동', memo:'', photoName:'photo.jpg', photoUrl:'', hasCost:false, costAmount:0,     receiptName:'',           receiptUrl:'' },
       ],
     },
   },
@@ -192,7 +194,7 @@ export default function AdminDashboard() {
 
   // ── data
   const [records, setRecords] = useState<MentoringRecord[]>(INITIAL_DATA)
-  const [tab, setTab]         = useState<Tab>('overview')
+  const [tab, setTab]         = useState<Tab>('manage')
 
   // ── add/edit modal
   const [showAddEdit, setShowAddEdit] = useState(false)
@@ -224,23 +226,7 @@ export default function AdminDashboard() {
   // Derived
   // ─────────────────────────────────────────────────────────────────────────
 
-  const visible   = useMemo(() => records.filter(r => r.status !== 'deleted'), [records])
-  const currentYM = TODAY.slice(0, 7)
-
-  const thisMonthExpected = useMemo(() =>
-    visible.filter(r => r.status === 'active').reduce((sum, r) => {
-      const md = getMonthDataForYM(r, currentYM)
-      return sum + (md ? getMonthlyPayment(md) : 0)
-    }, 0),
-  [visible, currentYM])
-
-  const totalExpected = useMemo(() =>
-    visible.reduce((s, r) => s + getTotalExpectedPayment(r), 0),
-  [visible])
-
-  const activeCount   = useMemo(() => visible.filter(r => r.status === 'active').length, [visible])
-  const blockedCount  = useMemo(() => visible.filter(r => r.uploadStatus === 'blocked').length, [visible])
-  const goalsSetCount = useMemo(() => visible.filter(r => r.goals.savedAt !== null).length, [visible])
+  const visible = useMemo(() => records.filter(r => r.status !== 'deleted'), [records])
 
   const settlementRows = useMemo(() => {
     const rows: {
@@ -546,7 +532,6 @@ export default function AdminDashboard() {
         <div className="max-w-[1400px] mx-auto">
           <nav className="flex">
             {([
-              ['overview',    '전체현황'],
               ['manage',      '멘토/멘티관리'],
               ['mail',        '안내메일'],
               ['settlement',  '최종정산'],
@@ -565,94 +550,6 @@ export default function AdminDashboard() {
       </div>
 
       <main className="p-6 max-w-[1400px] mx-auto space-y-6">
-
-        {/* ═══════════════════════════════════════════════════════════════
-            Tab: 전체현황
-        ═══════════════════════════════════════════════════════════════ */}
-        {tab === 'overview' && (
-          <>
-            <div className="grid grid-cols-5 gap-4">
-              {[
-                { label: '이번달 지급예정',  value: fmtAmount(thisMonthExpected), color: 'text-blue-600' },
-                { label: '전체 예상 지급액', value: fmtAmount(totalExpected),    color: 'text-green-600' },
-                { label: '진행중',           value: `${activeCount}건`,           color: 'text-indigo-600' },
-                { label: '업로드 차단',      value: `${blockedCount}건`,          color: 'text-red-600' },
-                { label: '목표 설정 완료',   value: `${goalsSetCount}건`,         color: 'text-amber-600' },
-              ].map(c => (
-                <div key={c.label} className="bg-white rounded-lg border border-gray-200 p-4">
-                  <div className="text-xs text-gray-500">{c.label}</div>
-                  <div className={`text-2xl font-bold mt-1 ${c.color}`}>{c.value}</div>
-                </div>
-              ))}
-            </div>
-
-            <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-              <div className="px-5 py-3 border-b border-gray-100">
-                <h2 className="font-semibold text-gray-700">전체 현황</h2>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50 text-gray-600">
-                    <tr>
-                      {['멘토', '멘티', '입사일', '활동기간', '진행월', '이번달 활동', '이번달 지급인정', '이번달 지급예상', '상태', '업로드', '진행현황'].map(h => (
-                        <th key={h} className="px-4 py-2.5 text-left font-medium whitespace-nowrap">{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {visible.length === 0 && (
-                      <tr><td colSpan={11} className="px-4 py-8 text-center text-gray-400">데이터 없음</td></tr>
-                    )}
-                    {visible.map(r => {
-                      const ci = getCurrentMonthIndex(r)
-                      const curMd = (ci >= 1 && ci <= 3) ? r.months.find(m => m.monthIndex === ci) ?? null : null
-                      const curTotal   = curMd ? countAllActivities(curMd)   : null
-                      const curValid   = curMd ? countValidActivities(curMd) : null
-                      const curPayment = curMd ? getMonthlyPayment(curMd)    : null
-                      return (
-                        <tr key={r.id} className="hover:bg-gray-50">
-                          <td className="px-4 py-2.5 font-medium whitespace-nowrap">{r.mentorName}</td>
-                          <td className="px-4 py-2.5 text-gray-600">{r.menteeName}</td>
-                          <td className="px-4 py-2.5 text-gray-500 text-xs whitespace-nowrap">{r.joinDate}</td>
-                          <td className="px-4 py-2.5 text-gray-500 text-xs whitespace-nowrap">
-                            {fmtPeriodMonthly(r.startDate, r.endDate)}
-                          </td>
-                          <td className="px-4 py-2.5 whitespace-nowrap">
-                            {ci === 0 ? '대기' : ci === 4 ? '종료' : `${ci}개월차`}
-                          </td>
-                          <td className="px-4 py-2.5 text-center text-gray-600">
-                            {curTotal !== null ? curTotal : <span className="text-gray-300">—</span>}
-                          </td>
-                          <td className="px-4 py-2.5 text-center text-gray-600">
-                            {curValid !== null ? curValid : <span className="text-gray-300">—</span>}
-                          </td>
-                          <td className="px-4 py-2.5 font-medium whitespace-nowrap">
-                            {curPayment !== null ? fmtAmount(curPayment) : <span className="text-gray-300">—</span>}
-                          </td>
-                          <td className="px-4 py-2.5">
-                            <Chip label={STATUS_LABEL[r.status]} color={STATUS_COLOR[r.status]} />
-                          </td>
-                          <td className="px-4 py-2.5">
-                            {r.uploadStatus === 'blocked'
-                              ? <Chip label="차단" color="bg-red-100 text-red-600" />
-                              : <Chip label="정상" color="bg-green-100 text-green-600" />}
-                          </td>
-                          <td className="px-4 py-2.5">
-                            <div className="flex flex-wrap gap-1">
-                              {getMentoringProgress(r).map((b, i) => (
-                                <Chip key={i} label={b.text} color={b.color} />
-                              ))}
-                            </div>
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </>
-        )}
 
         {/* ═══════════════════════════════════════════════════════════════
             Tab: 멘토/멘티관리
@@ -674,14 +571,14 @@ export default function AdminDashboard() {
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 text-gray-600">
                     <tr>
-                      {['멘토', '멘토 이메일', '멘티', '입사일', '활동기간', '상태', '업로드', '목표', '메모', '관리'].map(h => (
+                      {['멘토', '멘토 이메일', '멘티', '입사일', '활동기간', '진행현황', '상태', '업로드', '목표', '메모', '관리'].map(h => (
                         <th key={h} className="px-4 py-2.5 text-left font-medium whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
                     {visible.length === 0 && (
-                      <tr><td colSpan={10} className="px-4 py-8 text-center text-gray-400">등록된 멘토링이 없습니다</td></tr>
+                      <tr><td colSpan={11} className="px-4 py-8 text-center text-gray-400">등록된 멘토링이 없습니다</td></tr>
                     )}
                     {visible.map(r => (
                       <tr key={r.id} className="hover:bg-gray-50 align-top">
@@ -691,6 +588,13 @@ export default function AdminDashboard() {
                         <td className="px-4 py-3 text-gray-500 text-xs whitespace-nowrap">{r.joinDate}</td>
                         <td className="px-4 py-3 text-gray-500 text-xs whitespace-nowrap">
                           {fmtPeriodMonthly(r.startDate, r.endDate)}
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex flex-wrap gap-1">
+                            {getMentoringProgress(r).map((b, i) => (
+                              <Chip key={i} label={b.text} color={b.color} />
+                            ))}
+                          </div>
                         </td>
                         <td className="px-4 py-3">
                           <Chip label={STATUS_LABEL[r.status]} color={STATUS_COLOR[r.status]} />
@@ -1064,7 +968,7 @@ export default function AdminDashboard() {
                 </p>
               ) : null
             })()}
-            <p className="text-xs text-gray-400 mb-5">삭제 후 전체현황·정산 화면에서 제외됩니다. (소프트 삭제)</p>
+            <p className="text-xs text-gray-400 mb-5">삭제 후 정산 화면에서 제외됩니다. (소프트 삭제)</p>
             <div className="flex gap-2 justify-end">
               <button onClick={() => setDeleteTargetId(null)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">취소</button>
               <button onClick={confirmDelete} className="px-4 py-2 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700">삭제</button>
