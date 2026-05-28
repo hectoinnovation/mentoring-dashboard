@@ -485,7 +485,6 @@ export function generateInitialGuideMailHtml(record: MentoringRecord, link: stri
 
 <!-- 푸터 -->
 <tr><td style="background:#f1f5f9;padding:18px 40px;text-align:center;">
-  <p style="margin:0;font-size:12px;color:#94a3b8;">본 메일은 발신 전용입니다. 문의사항은 인재협업팀으로 연락해 주세요.</p>
 </td></tr>
 
 </table>
@@ -640,7 +639,6 @@ export function generateEndMailHtml(record: MentoringRecord): string {
 
 <!-- 푸터 -->
 <tr><td style="background:#f1f5f9;padding:18px 40px;text-align:center;">
-  <p style="margin:0;font-size:12px;color:#94a3b8;">본 메일은 발신 전용입니다. 문의사항은 인재협업팀으로 연락해 주세요.</p>
 </td></tr>
 
 </table>
