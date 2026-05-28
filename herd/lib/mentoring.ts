@@ -133,8 +133,10 @@ export function fmtPeriodMonthly(startDate: string, endDate: string): string {
 // 활동 인정 기준
 //
 //  지급인정(countValidActivities):
-//    사진 있음 + 비용 있음 + 영수증 있음 + 금액 > 0  → 인정 (사용금액 합계 포함)
-//    사진만 등록 / 비용 없음 / 금액 0 / 영수증 없음  → 미인정 (지급 기준 제외)
+//    사진 있음 + 비용 없음              → 인정 (사용금액 0)
+//    사진 있음 + 비용 있음 + 영수증 + 금액 > 0 → 인정 (사용금액 합계 포함)
+//    사진 없음                          → 미인정
+//    사진 있음 + 비용 있음 + 영수증 없음  → 미인정
 //
 //  활동수(countAllActivities):
 //    멘토가 등록한 모든 활동 — 사진만 등록 포함
@@ -143,13 +145,16 @@ export function fmtPeriodMonthly(startDate: string, endDate: string): string {
 
 /**
  * 지급인정 활동 수
- * 사진 + 비용 + 영수증 + 금액 > 0 을 모두 만족해야 1회 인정
- * 사진만 등록된 활동은 0회 처리
+ * - 사진 있음 + 비용 없음 → 1회 인정
+ * - 사진 있음 + 비용 있음 + 영수증 + 금액 > 0 → 1회 인정
+ * - 사진 없음, 또는 비용 있는데 영수증/금액 미비 → 미인정
  */
 export function countValidActivities(monthData: MonthData): number {
-  return monthData.activities.filter(a =>
-    !!a.photoName && a.hasCost && !!a.receiptName && a.costAmount > 0
-  ).length
+  return monthData.activities.filter(a => {
+    if (!a.photoName) return false           // 사진 필수
+    if (!a.hasCost)   return true            // 사진 + 비용 없음 → 인정
+    return !!a.receiptName && a.costAmount > 0  // 비용 있음 → 영수증 + 금액 필수
+  }).length
 }
 
 /** 전체 등록 활동 수 (유효 여부 무관) */

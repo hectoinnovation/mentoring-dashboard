@@ -55,7 +55,8 @@ type FormState = ReturnType<typeof blankForm>
 // 계산 예시 데이터 (지급 로직 검증용)
 // ─────────────────────────────────────────────────────────────────────────────
 
-// 계산 예시 — 새 지급인정 기준(사진+비용+영수증만 인정) 검증용
+// 계산 예시 — 지급인정 기준 검증용
+// 유효 = 사진 있음 + (비용 없음 OR 영수증+금액 있음)
 const SETTLEMENT_EXAMPLES: { label: string; desc: string; md: MonthData }[] = [
   {
     label: '예시A',
@@ -70,7 +71,7 @@ const SETTLEMENT_EXAMPLES: { label: string; desc: string; md: MonthData }[] = [
   },
   {
     label: '예시B',
-    desc: '사진+비용 3회 합계 120,000원 → 지급인정 3, 한도 100,000원으로 상한 적용',
+    desc: '사진+비용 3회 합계 120,000원 → 지급인정 3, 한도 100,000원으로 상한 적용 → 지급 100,000원',
     md: {
       monthIndex: 3,
       activities: [
@@ -82,18 +83,19 @@ const SETTLEMENT_EXAMPLES: { label: string; desc: string; md: MonthData }[] = [
   },
   {
     label: '예시C',
-    desc: '사진+비용 2회(각 15,000원) → 지급인정 2, 한도 50,000원, 실사용 30,000원 → 지급 30,000원',
+    desc: '사진+비용 1회(50,000원) + 사진+비용 1회(1,000원) + 사진만 1회 → 지급인정 3, 한도 100,000원, 실사용 51,000원 → 지급 51,000원',
     md: {
-      monthIndex: 2,
+      monthIndex: 3,
       activities: [
-        { id:'ex-c-1', activityDate:'2026-01-05', content:'활동', memo:'', photoName:'photo.jpg', photoUrl:'', hasCost:true, costAmount:15000, receiptName:'receipt.jpg', receiptUrl:'' },
-        { id:'ex-c-2', activityDate:'2026-01-12', content:'활동', memo:'', photoName:'photo.jpg', photoUrl:'', hasCost:true, costAmount:15000, receiptName:'receipt.jpg', receiptUrl:'' },
+        { id:'ex-c-1', activityDate:'2026-01-05', content:'활동', memo:'', photoName:'photo.jpg', photoUrl:'', hasCost:true,  costAmount:50000, receiptName:'receipt.jpg', receiptUrl:'' },
+        { id:'ex-c-2', activityDate:'2026-01-12', content:'활동', memo:'', photoName:'photo.jpg', photoUrl:'', hasCost:true,  costAmount:1000,  receiptName:'receipt.jpg', receiptUrl:'' },
+        { id:'ex-c-3', activityDate:'2026-01-19', content:'활동', memo:'', photoName:'photo.jpg', photoUrl:'', hasCost:false, costAmount:0,     receiptName:'',           receiptUrl:'' },
       ],
     },
   },
   {
     label: '예시D',
-    desc: '사진만 3회 (비용 없음) → 지급인정 0, 한도 0원, 지급 0원',
+    desc: '사진만 3회 (비용 없음) → 지급인정 3, 한도 100,000원, 실사용 0원 → 지급 0원',
     md: {
       monthIndex: 3,
       activities: [
@@ -105,7 +107,7 @@ const SETTLEMENT_EXAMPLES: { label: string; desc: string; md: MonthData }[] = [
   },
   {
     label: '예시E',
-    desc: '사진+비용 1회(30,000원) + 사진만 2회 → 지급인정 1, 한도 0원 (2회 미만), 지급 0원',
+    desc: '사진+비용 1회(30,000원) + 사진만 2회 → 지급인정 3, 한도 100,000원, 실사용 30,000원 → 지급 30,000원',
     md: {
       monthIndex: 3,
       activities: [
