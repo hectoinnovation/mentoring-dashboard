@@ -320,6 +320,39 @@ export async function dbUpdateActivity(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Delete activity (DB row + Storage files)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Supabase public URL → storage path (bucket 이하 경로만 추출) */
+function storagePathFromUrl(url: string): string | null {
+  try {
+    const urlObj = new URL(url)
+    const marker = `/object/public/${BUCKET}/`
+    const idx    = urlObj.pathname.indexOf(marker)
+    if (idx === -1) return null
+    return decodeURIComponent(urlObj.pathname.slice(idx + marker.length))
+  } catch {
+    return null
+  }
+}
+
+export async function dbDeleteActivity(activity: ActivityEntry): Promise<void> {
+  // 1) Storage 파일 삭제 (photo + receipt, best-effort)
+  const paths: string[] = []
+  if (activity.photoUrl)   { const p = storagePathFromUrl(activity.photoUrl);   if (p) paths.push(p) }
+  if (activity.receiptUrl) { const p = storagePathFromUrl(activity.receiptUrl); if (p) paths.push(p) }
+
+  if (paths.length > 0) {
+    const { error: sErr } = await supabase.storage.from(BUCKET).remove(paths)
+    if (sErr) console.warn('[dbDeleteActivity] storage remove error:', sErr)
+  }
+
+  // 2) DB row 삭제
+  const { error } = await supabase.from('activities').delete().eq('id', activity.id)
+  if (error) throw error
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Goals & last access
 // ─────────────────────────────────────────────────────────────────────────────
 

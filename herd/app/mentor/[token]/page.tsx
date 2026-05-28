@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useParams } from 'next/navigation'
 import {
   MentoringRecord, MonthData, ActivityEntry, MentoringGoals,
@@ -11,9 +11,32 @@ import {
   getTotalExpectedPayment, fmtAmount,
 } from '@/lib/mentoring'
 import {
-  fetchMentorByToken, dbInsertActivity, dbUpdateActivity,
+  fetchMentorByToken, dbInsertActivity, dbUpdateActivity, dbDeleteActivity,
   saveGoals, updateLastAccess,
 } from '@/lib/mentoring-db'
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Toast
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface ToastState { message: string; type: 'success' | 'error' }
+
+function Toast({ message, type, onClose }: ToastState & { onClose: () => void }) {
+  useEffect(() => {
+    const t = setTimeout(onClose, 3500)
+    return () => clearTimeout(t)
+  }, [onClose])
+
+  return (
+    <div className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2.5 px-5 py-3 rounded-xl shadow-xl text-sm font-medium pointer-events-auto transition-all ${
+      type === 'error' ? 'bg-red-600 text-white' : 'bg-green-600 text-white'
+    }`}>
+      <span>{type === 'error' ? '❌' : '✅'}</span>
+      <span>{message}</span>
+      <button onClick={onClose} className="ml-1 opacity-70 hover:opacity-100 text-base leading-none">✕</button>
+    </div>
+  )
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -137,7 +160,7 @@ function GoalScreen({ mentorName, menteeName, initial, onSave }: GoalScreenProps
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Activity add form (max 5 slots, costAmount required when hasCost)
+// Activity add form
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface ActivityFormProps {
@@ -150,41 +173,24 @@ function ActivityForm({ onSave, onCancel }: ActivityFormProps) {
   const [content, setContent]           = useState('')
   const [memo, setMemo]                 = useState('')
   const [hasCost, setHasCost]           = useState(false)
-  const [costAmountRaw, setCostAmountRaw] = useState('')  // string for input control
+  const [costAmountRaw, setCostAmountRaw] = useState('')
   const [photoFile, setPhotoFile]       = useState<File | null>(null)
   const [receiptFile, setReceiptFile]   = useState<File | null>(null)
   const [saving, setSaving]             = useState(false)
 
   function handleHasCostChange(checked: boolean) {
     setHasCost(checked)
-    if (!checked) {
-      setCostAmountRaw('')
-      setReceiptFile(null)
-    }
+    if (!checked) { setCostAmountRaw(''); setReceiptFile(null) }
   }
 
   async function handleSave() {
-    if (!activityDate || !content.trim()) {
-      alert('활동일과 활동내용은 필수입니다.')
-      return
-    }
-    if (!photoFile) {
-      alert('활동 사진은 필수입니다.')
-      return
-    }
+    if (!activityDate || !content.trim()) { alert('활동일과 활동내용은 필수입니다.'); return }
+    if (!photoFile) { alert('활동 사진은 필수입니다.'); return }
     if (hasCost) {
-      if (!costAmountRaw || costAmountRaw === '0') {
-        alert('비용 사용 있음 체크 시 사용 금액을 입력해야 합니다. (0원 불가)')
-        return
-      }
-      if (!receiptFile) {
-        alert('비용 사용 있음 체크 시 영수증을 업로드해야 합니다.')
-        return
-      }
+      if (!costAmountRaw || costAmountRaw === '0') { alert('비용 사용 있음 체크 시 사용 금액을 입력해야 합니다. (0원 불가)'); return }
+      if (!receiptFile) { alert('비용 사용 있음 체크 시 영수증을 업로드해야 합니다.'); return }
     }
-
     const costAmount = hasCost ? parseInt(costAmountRaw.replace(/,/g, ''), 10) || 0 : 0
-
     setSaving(true)
     try {
       await onSave(
@@ -205,68 +211,50 @@ function ActivityForm({ onSave, onCancel }: ActivityFormProps) {
 
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <label className="block text-xs font-medium text-gray-600 mb-1">
-            활동일 <span className="text-red-500">*</span>
-          </label>
-          <input type="date" value={activityDate}
-            onChange={e => setActivityDate(e.target.value)}
+          <label className="block text-xs font-medium text-gray-600 mb-1">활동일 <span className="text-red-500">*</span></label>
+          <input type="date" value={activityDate} onChange={e => setActivityDate(e.target.value)}
             className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white" />
         </div>
         <div>
           <label className="block text-xs font-medium text-gray-600 mb-1">메모</label>
-          <input type="text" value={memo} onChange={e => setMemo(e.target.value)}
-            placeholder="선택 사항"
+          <input type="text" value={memo} onChange={e => setMemo(e.target.value)} placeholder="선택 사항"
             className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white" />
         </div>
       </div>
 
       <div>
-        <label className="block text-xs font-medium text-gray-600 mb-1">
-          활동내용 <span className="text-red-500">*</span>
-        </label>
+        <label className="block text-xs font-medium text-gray-600 mb-1">활동내용 <span className="text-red-500">*</span></label>
         <textarea value={content} onChange={e => setContent(e.target.value)}
           rows={2} placeholder="예: 입사 적응 현황 점검 및 상담"
           className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white resize-none" />
       </div>
 
-      {/* 활동 사진 */}
       <div>
         <label className="block text-xs font-medium text-gray-600 mb-1">
           활동 사진 <span className="text-red-500">*</span>
           <span className="text-gray-400 font-normal ml-1">(사진 없으면 유효 활동 미인정)</span>
         </label>
-        <input type="file" accept="image/*"
-          onChange={e => setPhotoFile(e.target.files?.[0] ?? null)}
+        <input type="file" accept="image/*" onChange={e => setPhotoFile(e.target.files?.[0] ?? null)}
           className="w-full text-xs text-gray-600 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:bg-gray-100 file:text-gray-700 file:text-xs hover:file:bg-gray-200" />
         {photoFile && <p className="text-xs text-green-600 mt-0.5">✓ {photoFile.name}</p>}
       </div>
 
-      {/* 비용 사용 체크박스 */}
       <div className="bg-white rounded-lg border border-gray-200 p-3 space-y-3">
         <div className="flex items-center gap-2">
-          <input id="hasCost" type="checkbox" checked={hasCost}
-            onChange={e => handleHasCostChange(e.target.checked)}
+          <input id="hasCost" type="checkbox" checked={hasCost} onChange={e => handleHasCostChange(e.target.checked)}
             className="w-4 h-4 accent-blue-600 cursor-pointer" />
-          <label htmlFor="hasCost" className="text-sm font-medium text-gray-700 cursor-pointer select-none">
-            비용 사용 있음
-          </label>
+          <label htmlFor="hasCost" className="text-sm font-medium text-gray-700 cursor-pointer select-none">비용 사용 있음</label>
           <span className="text-xs text-gray-400">(체크 시 사용 금액 + 영수증 필수)</span>
         </div>
 
-        {/* 사용 금액 입력 */}
         <div>
           <label className={`block text-xs font-medium mb-1 ${hasCost ? 'text-gray-600' : 'text-gray-300'}`}>
             사용 금액{hasCost && <span className="text-red-500 ml-0.5">*</span>}
             {!hasCost && <span className="ml-1 font-normal">(비활성화)</span>}
           </label>
           <div className="flex items-center gap-2">
-            <input
-              type="number"
-              min="1"
-              value={costAmountRaw}
-              disabled={!hasCost}
-              onChange={e => setCostAmountRaw(e.target.value)}
-              placeholder="금액 입력 (숫자만)"
+            <input type="number" min="1" value={costAmountRaw} disabled={!hasCost}
+              onChange={e => setCostAmountRaw(e.target.value)} placeholder="금액 입력 (숫자만)"
               className={`flex-1 border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white ${
                 hasCost ? 'border-gray-300' : 'border-gray-100 text-gray-300 cursor-not-allowed opacity-50'
               }`}
@@ -274,20 +262,16 @@ function ActivityForm({ onSave, onCancel }: ActivityFormProps) {
             <span className={`text-sm ${hasCost ? 'text-gray-600' : 'text-gray-300'}`}>원</span>
           </div>
           {hasCost && costAmountRaw && Number(costAmountRaw) > 0 && (
-            <p className="text-xs text-blue-600 mt-0.5">
-              입력 금액: {Number(costAmountRaw).toLocaleString()}원
-            </p>
+            <p className="text-xs text-blue-600 mt-0.5">입력 금액: {Number(costAmountRaw).toLocaleString()}원</p>
           )}
         </div>
 
-        {/* 영수증 업로드 */}
         <div>
           <label className={`block text-xs font-medium mb-1 ${hasCost ? 'text-gray-600' : 'text-gray-300'}`}>
             영수증{hasCost && <span className="text-red-500 ml-0.5">*</span>}
             {!hasCost && <span className="ml-1 font-normal">(비활성화)</span>}
           </label>
-          <input type="file" accept="image/*,application/pdf"
-            disabled={!hasCost}
+          <input type="file" accept="image/*,application/pdf" disabled={!hasCost}
             onChange={e => setReceiptFile(e.target.files?.[0] ?? null)}
             className={`w-full text-xs file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-xs ${
               hasCost
@@ -295,9 +279,7 @@ function ActivityForm({ onSave, onCancel }: ActivityFormProps) {
                 : 'text-gray-300 file:bg-gray-50 file:text-gray-300 opacity-50 cursor-not-allowed'
             }`}
           />
-          {receiptFile && hasCost && (
-            <p className="text-xs text-green-600 mt-0.5">✓ {receiptFile.name}</p>
-          )}
+          {receiptFile && hasCost && <p className="text-xs text-green-600 mt-0.5">✓ {receiptFile.name}</p>}
         </div>
       </div>
 
@@ -310,7 +292,7 @@ function ActivityForm({ onSave, onCancel }: ActivityFormProps) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Activity edit form (pre-populated, updates existing entry by id)
+// Activity edit form
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface ActivityEditFormProps {
@@ -320,48 +302,29 @@ interface ActivityEditFormProps {
 }
 
 function ActivityEditForm({ initial, onSave, onCancel }: ActivityEditFormProps) {
-  const [activityDate, setActivityDate]     = useState(initial.activityDate)
-  const [content, setContent]               = useState(initial.content)
-  const [memo, setMemo]                     = useState(initial.memo)
-  const [hasCost, setHasCost]               = useState(initial.hasCost)
-  const [costAmountRaw, setCostAmountRaw]   = useState(
-    initial.costAmount > 0 ? String(initial.costAmount) : ''
-  )
-  const [photoFile, setPhotoFile]           = useState<File | null>(null)
-  const [receiptFile, setReceiptFile]       = useState<File | null>(null)
-  const [saving, setSaving]                 = useState(false)
+  const [activityDate, setActivityDate]   = useState(initial.activityDate)
+  const [content, setContent]             = useState(initial.content)
+  const [memo, setMemo]                   = useState(initial.memo)
+  const [hasCost, setHasCost]             = useState(initial.hasCost)
+  const [costAmountRaw, setCostAmountRaw] = useState(initial.costAmount > 0 ? String(initial.costAmount) : '')
+  const [photoFile, setPhotoFile]         = useState<File | null>(null)
+  const [receiptFile, setReceiptFile]     = useState<File | null>(null)
+  const [saving, setSaving]               = useState(false)
 
   function handleHasCostChange(checked: boolean) {
     setHasCost(checked)
-    if (!checked) {
-      setCostAmountRaw('')
-      setReceiptFile(null)
-    }
+    if (!checked) { setCostAmountRaw(''); setReceiptFile(null) }
   }
 
   async function handleSave() {
-    if (!activityDate || !content.trim()) {
-      alert('활동일과 활동내용은 필수입니다.')
-      return
-    }
-    if (!photoFile && !initial.photoName) {
-      alert('활동 사진은 필수입니다. 새 파일을 업로드하거나 기존 사진이 있어야 합니다.')
-      return
-    }
+    if (!activityDate || !content.trim()) { alert('활동일과 활동내용은 필수입니다.'); return }
+    if (!photoFile && !initial.photoName) { alert('활동 사진은 필수입니다.'); return }
     if (hasCost) {
-      if (!costAmountRaw || costAmountRaw === '0') {
-        alert('비용 사용 있음 체크 시 사용 금액을 입력해야 합니다. (0원 불가)')
-        return
-      }
+      if (!costAmountRaw || costAmountRaw === '0') { alert('비용 사용 있음 체크 시 사용 금액을 입력해야 합니다. (0원 불가)'); return }
       const receiptCheck = receiptFile ? receiptFile.name : initial.receiptName
-      if (!receiptCheck) {
-        alert('비용 사용 있음 체크 시 영수증을 업로드해야 합니다.')
-        return
-      }
+      if (!receiptCheck) { alert('비용 사용 있음 체크 시 영수증을 업로드해야 합니다.'); return }
     }
-
-    const costAmount  = hasCost ? (parseInt(costAmountRaw.replace(/,/g, ''), 10) || 0) : 0
-    // Pass existing names/urls as fallback; dbUpdateActivity will overwrite if new files given
+    const costAmount = hasCost ? (parseInt(costAmountRaw.replace(/,/g, ''), 10) || 0) : 0
     const updatedEntry: ActivityEntry = {
       id: initial.id,
       activityDate,
@@ -374,7 +337,6 @@ function ActivityEditForm({ initial, onSave, onCancel }: ActivityEditFormProps) 
       receiptName: !hasCost ? '' : (receiptFile ? receiptFile.name : initial.receiptName),
       receiptUrl:  !hasCost ? '' : initial.receiptUrl,
     }
-
     setSaving(true)
     try {
       await onSave(updatedEntry, photoFile ?? undefined, receiptFile ?? undefined)
@@ -391,42 +353,30 @@ function ActivityEditForm({ initial, onSave, onCancel }: ActivityEditFormProps) 
 
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <label className="block text-xs font-medium text-gray-600 mb-1">
-            활동일 <span className="text-red-500">*</span>
-          </label>
-          <input type="date" value={activityDate}
-            onChange={e => setActivityDate(e.target.value)}
+          <label className="block text-xs font-medium text-gray-600 mb-1">활동일 <span className="text-red-500">*</span></label>
+          <input type="date" value={activityDate} onChange={e => setActivityDate(e.target.value)}
             className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300 bg-white" />
         </div>
         <div>
           <label className="block text-xs font-medium text-gray-600 mb-1">메모</label>
-          <input type="text" value={memo} onChange={e => setMemo(e.target.value)}
-            placeholder="선택 사항"
+          <input type="text" value={memo} onChange={e => setMemo(e.target.value)} placeholder="선택 사항"
             className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300 bg-white" />
         </div>
       </div>
 
       <div>
-        <label className="block text-xs font-medium text-gray-600 mb-1">
-          활동내용 <span className="text-red-500">*</span>
-        </label>
+        <label className="block text-xs font-medium text-gray-600 mb-1">활동내용 <span className="text-red-500">*</span></label>
         <textarea value={content} onChange={e => setContent(e.target.value)}
           rows={2} placeholder="예: 입사 적응 현황 점검 및 상담"
           className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300 bg-white resize-none" />
       </div>
 
-      {/* 활동 사진 */}
       <div>
-        <label className="block text-xs font-medium text-gray-600 mb-1">
-          활동 사진 <span className="text-red-500">*</span>
-        </label>
+        <label className="block text-xs font-medium text-gray-600 mb-1">활동 사진 <span className="text-red-500">*</span></label>
         {initial.photoName && (
-          <p className="text-xs text-green-700 bg-green-50 rounded px-2 py-1 mb-1">
-            현재 파일: {initial.photoName}
-          </p>
+          <p className="text-xs text-green-700 bg-green-50 rounded px-2 py-1 mb-1">현재 파일: {initial.photoName}</p>
         )}
-        <input type="file" accept="image/*"
-          onChange={e => setPhotoFile(e.target.files?.[0] ?? null)}
+        <input type="file" accept="image/*" onChange={e => setPhotoFile(e.target.files?.[0] ?? null)}
           className="w-full text-xs text-gray-600 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:bg-gray-100 file:text-gray-700 file:text-xs hover:file:bg-gray-200" />
         {photoFile
           ? <p className="text-xs text-green-600 mt-0.5">✓ 새 파일: {photoFile.name}</p>
@@ -434,15 +384,12 @@ function ActivityEditForm({ initial, onSave, onCancel }: ActivityEditFormProps) 
         }
       </div>
 
-      {/* 비용 사용 */}
       <div className="bg-white rounded-lg border border-gray-200 p-3 space-y-3">
         <div className="flex items-center gap-2">
           <input id={`hasCost-edit-${initial.id}`} type="checkbox" checked={hasCost}
             onChange={e => handleHasCostChange(e.target.checked)}
             className="w-4 h-4 accent-amber-600 cursor-pointer" />
-          <label htmlFor={`hasCost-edit-${initial.id}`} className="text-sm font-medium text-gray-700 cursor-pointer select-none">
-            비용 사용 있음
-          </label>
+          <label htmlFor={`hasCost-edit-${initial.id}`} className="text-sm font-medium text-gray-700 cursor-pointer select-none">비용 사용 있음</label>
           <span className="text-xs text-gray-400">(체크 시 사용 금액 + 영수증 필수)</span>
         </div>
 
@@ -453,8 +400,7 @@ function ActivityEditForm({ initial, onSave, onCancel }: ActivityEditFormProps) 
           </label>
           <div className="flex items-center gap-2">
             <input type="number" min="1" value={costAmountRaw} disabled={!hasCost}
-              onChange={e => setCostAmountRaw(e.target.value)}
-              placeholder="금액 입력 (숫자만)"
+              onChange={e => setCostAmountRaw(e.target.value)} placeholder="금액 입력 (숫자만)"
               className={`flex-1 border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300 bg-white ${
                 hasCost ? 'border-gray-300' : 'border-gray-100 text-gray-300 cursor-not-allowed opacity-50'
               }`}
@@ -472,9 +418,7 @@ function ActivityEditForm({ initial, onSave, onCancel }: ActivityEditFormProps) 
             {!hasCost && <span className="ml-1 font-normal">(비활성화)</span>}
           </label>
           {hasCost && initial.receiptName && (
-            <p className="text-xs text-green-700 bg-green-50 rounded px-2 py-1 mb-1">
-              현재 파일: {initial.receiptName}
-            </p>
+            <p className="text-xs text-green-700 bg-green-50 rounded px-2 py-1 mb-1">현재 파일: {initial.receiptName}</p>
           )}
           <input type="file" accept="image/*,application/pdf" disabled={!hasCost}
             onChange={e => setReceiptFile(e.target.files?.[0] ?? null)}
@@ -493,9 +437,7 @@ function ActivityEditForm({ initial, onSave, onCancel }: ActivityEditFormProps) 
 
       <div className="flex justify-end gap-2 pt-1">
         <button onClick={onCancel} disabled={saving}
-          className="px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded-lg disabled:opacity-50">
-          취소
-        </button>
+          className="px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded-lg disabled:opacity-50">취소</button>
         <button onClick={handleSave} disabled={saving}
           className="px-4 py-1.5 text-sm bg-amber-600 text-white rounded-lg hover:bg-amber-700 font-medium disabled:opacity-50">
           {saving ? '저장 중...' : '수정 저장'}
@@ -517,11 +459,16 @@ interface MonthCardProps {
   uploadBlocked:      boolean
   onAddActivity:      (entry: Omit<ActivityEntry, 'id'>, photoFile: File, receiptFile?: File) => Promise<void>
   onUpdateActivity:   (updated: ActivityEntry, photoFile?: File, receiptFile?: File) => Promise<void>
+  onDeleteActivity:   (activity: ActivityEntry) => void
 }
 
-function MonthCard({ monthData, monthIndex, startDate, currentMonthIndex, uploadBlocked, onAddActivity, onUpdateActivity }: MonthCardProps) {
-  const [showForm, setShowForm]               = useState(false)
-  const [editingId, setEditingId]             = useState<string | null>(null)
+function MonthCard({
+  monthData, monthIndex, startDate, currentMonthIndex,
+  uploadBlocked, onAddActivity, onUpdateActivity, onDeleteActivity,
+}: MonthCardProps) {
+  const [showForm, setShowForm]   = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
+
   const { start, end } = getMonthPeriod(startDate, monthIndex)
   const valid      = countValidActivities(monthData)
   const total      = countAllActivities(monthData)
@@ -562,7 +509,7 @@ function MonthCard({ monthData, monthIndex, startDate, currentMonthIndex, upload
             <p className="text-xs text-gray-500 mt-0.5">{start} ~ {end}</p>
           </div>
 
-          {/* Stats 4개 */}
+          {/* Stats */}
           <div className="flex items-center gap-3 flex-wrap">
             <div className="text-right">
               <div className="text-xs text-gray-400">활동 증빙</div>
@@ -613,16 +560,14 @@ function MonthCard({ monthData, monthIndex, startDate, currentMonthIndex, upload
               const isEditing = editingId === a.id
               return (
                 <div key={a.id}>
-                  <div
-                    className={`flex items-start gap-3 p-3 rounded-lg border ${
-                      isEditing
-                        ? 'border-amber-300 bg-amber-50'
-                        : isValid
-                          ? 'border-green-200 bg-green-50'
-                          : 'border-orange-100 bg-orange-50'
-                    }`}
-                  >
-                    <div className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
+                  <div className={`flex items-start gap-3 p-3 rounded-lg border transition-colors ${
+                    isEditing
+                      ? 'border-amber-300 bg-amber-50'
+                      : isValid
+                        ? 'border-green-200 bg-green-50'
+                        : 'border-orange-100 bg-orange-50'
+                  }`}>
+                    <div className={`flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold mt-0.5 ${
                       isValid ? 'bg-green-600 text-white' : 'bg-orange-300 text-white'
                     }`}>
                       {idx + 1}
@@ -661,20 +606,32 @@ function MonthCard({ monthData, monthIndex, startDate, currentMonthIndex, upload
                         }
                       </div>
                     </div>
-                    {/* 수정 버튼 (업로드 차단 시 숨김, 미래 기간 숨김) */}
+
+                    {/* 수정 / 삭제 버튼 */}
                     {!uploadBlocked && !isFuture && (
-                      <button
-                        onClick={() => setEditingId(isEditing ? null : a.id)}
-                        className={`flex-shrink-0 px-2.5 py-1 text-xs font-medium rounded-lg border transition-colors ${
-                          isEditing
-                            ? 'border-amber-400 bg-amber-100 text-amber-700 hover:bg-amber-200'
-                            : 'border-gray-300 bg-white text-gray-600 hover:bg-gray-50 hover:border-gray-400'
-                        }`}
-                      >
-                        {isEditing ? '닫기' : '수정'}
-                      </button>
+                      <div className="flex-shrink-0 flex gap-1">
+                        <button
+                          onClick={() => setEditingId(isEditing ? null : a.id)}
+                          className={`px-2.5 py-1 text-xs font-medium rounded-lg border transition-colors ${
+                            isEditing
+                              ? 'border-amber-400 bg-amber-100 text-amber-700 hover:bg-amber-200'
+                              : 'border-gray-300 bg-white text-gray-600 hover:bg-gray-50 hover:border-gray-400'
+                          }`}
+                        >
+                          {isEditing ? '닫기' : '수정'}
+                        </button>
+                        {!isEditing && (
+                          <button
+                            onClick={() => onDeleteActivity(a)}
+                            className="px-2.5 py-1 text-xs font-medium rounded-lg border border-red-200 bg-white text-red-500 hover:bg-red-50 hover:border-red-400 transition-colors"
+                          >
+                            삭제
+                          </button>
+                        )}
+                      </div>
                     )}
                   </div>
+
                   {/* 인라인 수정 폼 */}
                   {isEditing && (
                     <ActivityEditForm
@@ -689,11 +646,11 @@ function MonthCard({ monthData, monthIndex, startDate, currentMonthIndex, upload
           </div>
         )}
 
-        {/* Slot indicator bar */}
+        {/* Slot progress bar */}
         {!isFuture && (
           <div className="flex gap-1.5 mt-3">
             {Array.from({ length: 5 }).map((_, i) => (
-              <div key={i} className={`flex-1 h-1.5 rounded-full ${i < total ? 'bg-blue-400' : 'bg-gray-200'}`} />
+              <div key={i} className={`flex-1 h-1.5 rounded-full transition-colors ${i < total ? 'bg-blue-400' : 'bg-gray-200'}`} />
             ))}
           </div>
         )}
@@ -727,6 +684,53 @@ function MonthCard({ monthData, monthIndex, startDate, currentMonthIndex, upload
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Delete confirm modal
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface DeleteConfirmModalProps {
+  activity: ActivityEntry
+  deleting: boolean
+  onConfirm: () => void
+  onCancel: () => void
+}
+
+function DeleteConfirmModal({ activity, deleting, onConfirm, onCancel }: DeleteConfirmModalProps) {
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center px-4">
+      {/* backdrop */}
+      <div className="absolute inset-0 bg-black/40" onClick={!deleting ? onCancel : undefined} />
+      {/* modal */}
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6 z-10">
+        <div className="text-center mb-5">
+          <div className="text-4xl mb-3">🗑️</div>
+          <h3 className="text-base font-bold text-gray-800">활동을 삭제하시겠습니까?</h3>
+          <p className="text-xs text-gray-500 mt-2 leading-relaxed">
+            <span className="font-medium text-gray-700">{activity.activityDate}</span> · {activity.content}
+          </p>
+          <p className="text-xs text-red-500 mt-2">삭제 후에는 복구할 수 없으며, 첨부 파일도 함께 삭제됩니다.</p>
+        </div>
+        <div className="flex gap-2">
+          <button
+            onClick={onCancel}
+            disabled={deleting}
+            className="flex-1 py-2.5 text-sm font-medium text-gray-600 bg-gray-100 rounded-xl hover:bg-gray-200 disabled:opacity-50 transition-colors"
+          >
+            취소
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={deleting}
+            className="flex-1 py-2.5 text-sm font-medium text-white bg-red-600 rounded-xl hover:bg-red-700 disabled:opacity-50 transition-colors"
+          >
+            {deleting ? '삭제 중...' : '삭제'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Main page
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -734,10 +738,20 @@ export default function MentorPage() {
   const params = useParams()
   const token  = typeof params.token === 'string' ? params.token : ''
 
-  const [record, setRecord] = useState<MentoringRecord | null>(null)
+  const [record, setRecord]         = useState<MentoringRecord | null>(null)
+  const [goalsDone, setGoalsDone]   = useState<boolean | null>(null)
+  const [toast, setToast]           = useState<ToastState | null>(null)
+  const [deleteConfirm, setDeleteConfirm] = useState<{
+    activity: ActivityEntry
+    monthIndex: 1 | 2 | 3
+  } | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
-  // null=loading, false=show goal screen, true=show main
-  const [goalsDone, setGoalsDone] = useState<boolean | null>(null)
+  const showToast = useCallback((message: string, type: 'success' | 'error' = 'error') => {
+    setToast({ message, type })
+  }, [])
+
+  const dismissToast = useCallback(() => setToast(null), [])
 
   // Fetch record from Supabase on mount
   useEffect(() => {
@@ -749,7 +763,7 @@ export default function MentorPage() {
           updateLastAccess(r.id, TODAY).catch(console.error)
           setGoalsDone(r.goals.savedAt ? true : false)
         } else {
-          setGoalsDone(true) // show not-found
+          setGoalsDone(true)
         }
       })
       .catch(err => {
@@ -799,6 +813,37 @@ export default function MentorPage() {
     })
   }
 
+  function triggerDelete(monthIndex: 1 | 2 | 3, activity: ActivityEntry) {
+    setDeleteConfirm({ activity, monthIndex })
+  }
+
+  async function confirmDelete() {
+    if (!deleteConfirm) return
+    const { activity, monthIndex } = deleteConfirm
+    setDeleteConfirm(null)
+    setDeleting(true)
+    try {
+      await dbDeleteActivity(activity)
+      setRecord(prev => {
+        if (!prev) return prev
+        return {
+          ...prev,
+          months: prev.months.map(m =>
+            m.monthIndex === monthIndex
+              ? { ...m, activities: m.activities.filter(a => a.id !== activity.id) }
+              : m,
+          ),
+        }
+      })
+      showToast('활동이 삭제되었습니다.', 'success')
+    } catch (err) {
+      console.error('[confirmDelete]', err)
+      showToast('삭제 중 오류가 발생했습니다. 다시 시도해주세요.', 'error')
+    } finally {
+      setDeleting(false)
+    }
+  }
+
   if (goalsDone === null) return null
 
   if (!record) {
@@ -830,6 +875,19 @@ export default function MentorPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
+      {/* 삭제 확인 모달 */}
+      {deleteConfirm && (
+        <DeleteConfirmModal
+          activity={deleteConfirm.activity}
+          deleting={deleting}
+          onConfirm={confirmDelete}
+          onCancel={() => setDeleteConfirm(null)}
+        />
+      )}
+
+      {/* Toast */}
+      {toast && <Toast message={toast.message} type={toast.type} onClose={dismissToast} />}
+
       {/* Header */}
       <header className="bg-white border-b border-gray-200 px-6 py-4">
         <div className="max-w-3xl mx-auto flex items-center justify-between">
@@ -970,6 +1028,7 @@ export default function MentorPage() {
               uploadBlocked={isBlocked}
               onAddActivity={(entry, photoFile, receiptFile) => addActivity(mi, entry, photoFile, receiptFile)}
               onUpdateActivity={(updated, photoFile, receiptFile) => updateActivity(mi, updated, photoFile, receiptFile)}
+              onDeleteActivity={(activity) => triggerDelete(mi, activity)}
             />
           )
         })}
