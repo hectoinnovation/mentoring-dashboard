@@ -2,8 +2,8 @@
 
 import { useState, useMemo, useEffect } from 'react'
 import {
-  MentoringRecord, MentoringStatus, UploadStatus, MentoringGoals, MonthData,
-  INITIAL_DATA, createEmptyMonths, createEmptyGoals, generateToken,
+  MentoringRecord, MentoringStatus, UploadStatus, MonthData,
+  createEmptyMonths, createEmptyGoals, generateToken,
   calcDatesFromJoinMonth, fmtPeriodMonthly, TODAY,
   getMonthYM,
   countValidActivities, countAllActivities,
@@ -13,6 +13,9 @@ import {
   sendInitialGuideMail, sendEndMail,
   getMentoringProgress,
 } from '@/lib/mentoring'
+import {
+  fetchAllMentors, insertMentor, patchMentor,
+} from '@/lib/mentoring-db'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants & helpers
@@ -193,8 +196,20 @@ export default function AdminDashboard() {
   }, [])
 
   // ── data
-  const [records, setRecords] = useState<MentoringRecord[]>(INITIAL_DATA)
-  const [tab, setTab]         = useState<Tab>('manage')
+  const [records, setRecords]   = useState<MentoringRecord[]>([])
+  const [dbLoading, setDbLoading] = useState(false)
+  const [saving, setSaving]     = useState(false)
+  const [tab, setTab]           = useState<Tab>('manage')
+
+  // Supabase에서 전체 멘토 데이터 로드
+  useEffect(() => {
+    if (authed !== true) return
+    setDbLoading(true)
+    fetchAllMentors()
+      .then(setRecords)
+      .catch(err => console.error('[fetchAllMentors]', err))
+      .finally(() => setDbLoading(false))
+  }, [authed])
 
   // ── add/edit modal
   const [showAddEdit, setShowAddEdit] = useState(false)
@@ -295,58 +310,92 @@ export default function AdminDashboard() {
     }
   }
 
-  function saveForm() {
+  async function saveForm() {
     if (!form.mentorName || !form.mentorEmail || !form.menteeName || !form.joinDate || !form.joinMonth) {
       alert('멘토명, 멘토 이메일, 멘티명, 입사일, 입사월은 필수입니다.')
       return
     }
-    if (editingId) {
-      setRecords(prev => prev.map(r => r.id === editingId ? {
-        ...r,
-        mentorName: form.mentorName, mentorEmail: form.mentorEmail,
-        menteeName: form.menteeName,
-        joinDate: form.joinDate,
-        joinMonth: form.joinMonth, startDate: form.startDate, endDate: form.endDate,
-        status: form.status, uploadStatus: form.uploadStatus,
-        uploadBlockReason: form.uploadBlockReason, note: form.note,
-      } : r))
-    } else {
-      const newRecord: MentoringRecord = {
-        id: Date.now().toString(),
-        mentorName: form.mentorName, mentorEmail: form.mentorEmail,
-        menteeName: form.menteeName,
-        joinDate: form.joinDate,
-        joinMonth: form.joinMonth, startDate: form.startDate, endDate: form.endDate,
-        status: form.status, uploadStatus: form.uploadStatus,
-        uploadBlockReason: form.uploadBlockReason, note: form.note,
-        token: generateToken(),
-        months: createEmptyMonths(),
-        goals: createEmptyGoals(),
-        initialMailSent: false, initialMailSentAt: null,
-        endMailSent: false, endMailSentAt: null,
-        linkCopied: false, lastAccessAt: null,
-        createdAt: TODAY, deletedAt: null,
+    setSaving(true)
+    try {
+      if (editingId) {
+        await patchMentor(editingId, {
+          mentor_name:         form.mentorName,
+          mentor_email:        form.mentorEmail,
+          mentee_name:         form.menteeName,
+          join_date:           form.joinDate,
+          join_month:          form.joinMonth,
+          start_date:          form.startDate,
+          end_date:            form.endDate,
+          status:              form.status,
+          upload_status:       form.uploadStatus,
+          upload_block_reason: form.uploadBlockReason,
+          note:                form.note,
+        })
+        setRecords(prev => prev.map(r => r.id === editingId ? {
+          ...r,
+          mentorName: form.mentorName, mentorEmail: form.mentorEmail,
+          menteeName: form.menteeName,
+          joinDate: form.joinDate,
+          joinMonth: form.joinMonth, startDate: form.startDate, endDate: form.endDate,
+          status: form.status, uploadStatus: form.uploadStatus,
+          uploadBlockReason: form.uploadBlockReason, note: form.note,
+        } : r))
+      } else {
+        const newRecord: MentoringRecord = {
+          id: Date.now().toString(),
+          mentorName: form.mentorName, mentorEmail: form.mentorEmail,
+          menteeName: form.menteeName,
+          joinDate: form.joinDate,
+          joinMonth: form.joinMonth, startDate: form.startDate, endDate: form.endDate,
+          status: form.status, uploadStatus: form.uploadStatus,
+          uploadBlockReason: form.uploadBlockReason, note: form.note,
+          token: generateToken(),
+          months: createEmptyMonths(),
+          goals: createEmptyGoals(),
+          initialMailSent: false, initialMailSentAt: null,
+          endMailSent: false, endMailSentAt: null,
+          linkCopied: false, lastAccessAt: null,
+          createdAt: TODAY, deletedAt: null,
+        }
+        await insertMentor(newRecord)
+        setRecords(prev => [...prev, newRecord])
       }
-      setRecords(prev => [...prev, newRecord])
+      setShowAddEdit(false)
+    } catch (err) {
+      console.error('[saveForm]', err)
+      alert('저장 중 오류가 발생했습니다. 다시 시도해주세요.')
+    } finally {
+      setSaving(false)
     }
-    setShowAddEdit(false)
   }
 
-  function confirmDelete() {
+  async function confirmDelete() {
     if (!deleteTargetId) return
-    setRecords(prev => prev.map(r =>
-      r.id === deleteTargetId
-        ? { ...r, status: 'deleted' as MentoringStatus, deletedAt: TODAY }
-        : r,
-    ))
+    try {
+      await patchMentor(deleteTargetId, { status: 'deleted', deleted_at: TODAY })
+      setRecords(prev => prev.map(r =>
+        r.id === deleteTargetId
+          ? { ...r, status: 'deleted' as MentoringStatus, deletedAt: TODAY }
+          : r,
+      ))
+    } catch (err) {
+      console.error('[confirmDelete]', err)
+      alert('삭제 중 오류가 발생했습니다.')
+    }
     setDeleteTargetId(null)
   }
 
-  function toggleBlock(r: MentoringRecord) {
+  async function toggleBlock(r: MentoringRecord) {
     if (r.uploadStatus === 'blocked') {
-      setRecords(prev => prev.map(x =>
-        x.id === r.id ? { ...x, uploadStatus: 'enabled' as UploadStatus, uploadBlockReason: '' } : x,
-      ))
+      try {
+        await patchMentor(r.id, { upload_status: 'enabled', upload_block_reason: '' })
+        setRecords(prev => prev.map(x =>
+          x.id === r.id ? { ...x, uploadStatus: 'enabled' as UploadStatus, uploadBlockReason: '' } : x,
+        ))
+      } catch (err) {
+        console.error('[toggleBlock]', err)
+        alert('차단 해제 중 오류가 발생했습니다.')
+      }
     } else {
       setBlockReasonPreset('멘티 퇴사')
       setBlockReasonCustom('')
@@ -354,34 +403,33 @@ export default function AdminDashboard() {
     }
   }
 
-  function confirmBlock() {
+  async function confirmBlock() {
     if (!blockTargetId) return
     const reason = blockReasonPreset === '기타' ? blockReasonCustom : blockReasonPreset
-    setRecords(prev => prev.map(r =>
-      r.id === blockTargetId
-        ? { ...r, uploadStatus: 'blocked' as UploadStatus, uploadBlockReason: reason }
-        : r,
-    ))
+    try {
+      await patchMentor(blockTargetId, { upload_status: 'blocked', upload_block_reason: reason })
+      setRecords(prev => prev.map(r =>
+        r.id === blockTargetId
+          ? { ...r, uploadStatus: 'blocked' as UploadStatus, uploadBlockReason: reason }
+          : r,
+      ))
+    } catch (err) {
+      console.error('[confirmBlock]', err)
+      alert('차단 중 오류가 발생했습니다.')
+    }
     setBlockTargetId(null)
   }
 
   function copyLink(r: MentoringRecord) {
     const link = `${window.location.origin}/mentor/${r.token}`
     navigator.clipboard.writeText(link).then(() => {
+      patchMentor(r.id, { link_copied: true }).catch(console.error)
       setRecords(prev => prev.map(x => x.id === r.id ? { ...x, linkCopied: true } : x))
       alert('링크가 복사되었습니다.\n\n' + link)
     })
   }
 
   function openGoalsModal(r: MentoringRecord) {
-    try {
-      const saved = localStorage.getItem(`mentor_goals_${r.token}`)
-      if (saved) {
-        const goals: MentoringGoals = JSON.parse(saved)
-        setGoalsModalRecord({ ...r, goals })
-        return
-      }
-    } catch { /* ignore */ }
     setGoalsModalRecord(r)
   }
 
@@ -406,10 +454,12 @@ export default function AdminDashboard() {
     try {
       if (mailPreviewType === 'initial') {
         await sendInitialGuideMail(mailPreviewRecord)
+        await patchMentor(mailPreviewRecord.id, { initial_mail_sent: true, initial_mail_sent_at: TODAY })
         setRecords(prev => prev.map(r => r.id === mailPreviewRecord.id
           ? { ...r, initialMailSent: true, initialMailSentAt: TODAY } : r))
       } else {
         await sendEndMail(mailPreviewRecord)
+        await patchMentor(mailPreviewRecord.id, { end_mail_sent: true, end_mail_sent_at: TODAY })
         setRecords(prev => prev.map(r => r.id === mailPreviewRecord.id
           ? { ...r, endMailSent: true, endMailSentAt: TODAY } : r))
       }
@@ -441,6 +491,7 @@ export default function AdminDashboard() {
     setBulkSending('initial')
     try {
       await Promise.allSettled(targets.map(r => sendInitialGuideMail(r)))
+      await Promise.allSettled(targets.map(r => patchMentor(r.id, { initial_mail_sent: true, initial_mail_sent_at: TODAY })))
       setRecords(prev => prev.map(r =>
         selectedForMail.has(r.id)
           ? { ...r, initialMailSent: true, initialMailSentAt: TODAY }
@@ -458,6 +509,7 @@ export default function AdminDashboard() {
     setBulkSending('end')
     try {
       await Promise.allSettled(targets.map(r => sendEndMail(r)))
+      await Promise.allSettled(targets.map(r => patchMentor(r.id, { end_mail_sent: true, end_mail_sent_at: TODAY })))
       setRecords(prev => prev.map(r =>
         selectedForMail.has(r.id)
           ? { ...r, endMailSent: true, endMailSentAt: TODAY }
@@ -548,6 +600,16 @@ export default function AdminDashboard() {
           </nav>
         </div>
       </div>
+
+      {/* DB 로딩 */}
+      {dbLoading && (
+        <div className="fixed inset-0 bg-white/60 z-50 flex items-center justify-center">
+          <div className="bg-white rounded-xl shadow-lg px-8 py-6 flex items-center gap-4">
+            <div className="w-6 h-6 border-3 border-blue-500 border-t-transparent rounded-full animate-spin" />
+            <span className="text-sm text-gray-600">데이터 불러오는 중...</span>
+          </div>
+        </div>
+      )}
 
       <main className="p-6 max-w-[1400px] mx-auto space-y-6">
 
@@ -948,8 +1010,8 @@ export default function AdminDashboard() {
               </div>
             </div>
             <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-2">
-              <button onClick={() => setShowAddEdit(false)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">취소</button>
-              <button onClick={saveForm} className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">저장</button>
+              <button onClick={() => setShowAddEdit(false)} disabled={saving} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg disabled:opacity-50">취소</button>
+              <button onClick={saveForm} disabled={saving} className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{saving ? '저장 중...' : '저장'}</button>
             </div>
           </div>
         </div>

@@ -4,12 +4,16 @@ import { useState, useEffect } from 'react'
 import { useParams } from 'next/navigation'
 import {
   MentoringRecord, MonthData, ActivityEntry, MentoringGoals,
-  INITIAL_DATA, TODAY,
+  TODAY,
   getMonthPeriod, getCurrentMonthIndex, fmtPeriodMonthly,
   countValidActivities, countAllActivities,
   getMonthActualCost, getMonthPaymentLimit, getMonthlyPayment,
   getTotalExpectedPayment, fmtAmount,
 } from '@/lib/mentoring'
+import {
+  fetchMentorByToken, dbInsertActivity, dbUpdateActivity,
+  saveGoals, updateLastAccess,
+} from '@/lib/mentoring-db'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -137,7 +141,7 @@ function GoalScreen({ mentorName, menteeName, initial, onSave }: GoalScreenProps
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface ActivityFormProps {
-  onSave:   (entry: Omit<ActivityEntry, 'id'>) => void
+  onSave:   (entry: Omit<ActivityEntry, 'id'>, photoFile: File, receiptFile?: File) => Promise<void>
   onCancel: () => void
 }
 
@@ -149,6 +153,7 @@ function ActivityForm({ onSave, onCancel }: ActivityFormProps) {
   const [costAmountRaw, setCostAmountRaw] = useState('')  // string for input control
   const [photoFile, setPhotoFile]       = useState<File | null>(null)
   const [receiptFile, setReceiptFile]   = useState<File | null>(null)
+  const [saving, setSaving]             = useState(false)
 
   function handleHasCostChange(checked: boolean) {
     setHasCost(checked)
@@ -158,7 +163,7 @@ function ActivityForm({ onSave, onCancel }: ActivityFormProps) {
     }
   }
 
-  function handleSave() {
+  async function handleSave() {
     if (!activityDate || !content.trim()) {
       alert('활동일과 활동내용은 필수입니다.')
       return
@@ -180,17 +185,18 @@ function ActivityForm({ onSave, onCancel }: ActivityFormProps) {
 
     const costAmount = hasCost ? parseInt(costAmountRaw.replace(/,/g, ''), 10) || 0 : 0
 
-    onSave({
-      activityDate,
-      content,
-      memo,
-      hasCost,
-      costAmount,
-      photoName:   photoFile?.name   ?? '',
-      photoUrl:    photoFile ? URL.createObjectURL(photoFile) : '',
-      receiptName: receiptFile?.name ?? '',
-      receiptUrl:  receiptFile ? URL.createObjectURL(receiptFile) : '',
-    })
+    setSaving(true)
+    try {
+      await onSave(
+        { activityDate, content, memo, hasCost, costAmount, photoName: '', photoUrl: '', receiptName: '', receiptUrl: '' },
+        photoFile,
+        receiptFile ?? undefined,
+      )
+    } catch {
+      alert('저장 중 오류가 발생했습니다. 다시 시도해주세요.')
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -296,8 +302,8 @@ function ActivityForm({ onSave, onCancel }: ActivityFormProps) {
       </div>
 
       <div className="flex justify-end gap-2 pt-1">
-        <button onClick={onCancel} className="px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">취소</button>
-        <button onClick={handleSave} className="px-4 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">저장</button>
+        <button onClick={onCancel} disabled={saving} className="px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded-lg disabled:opacity-50">취소</button>
+        <button onClick={handleSave} disabled={saving} className="px-4 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{saving ? '저장 중...' : '저장'}</button>
       </div>
     </div>
   )
@@ -309,7 +315,7 @@ function ActivityForm({ onSave, onCancel }: ActivityFormProps) {
 
 interface ActivityEditFormProps {
   initial:  ActivityEntry
-  onSave:   (updated: ActivityEntry) => void
+  onSave:   (updated: ActivityEntry, photoFile?: File, receiptFile?: File) => Promise<void>
   onCancel: () => void
 }
 
@@ -323,6 +329,7 @@ function ActivityEditForm({ initial, onSave, onCancel }: ActivityEditFormProps) 
   )
   const [photoFile, setPhotoFile]           = useState<File | null>(null)
   const [receiptFile, setReceiptFile]       = useState<File | null>(null)
+  const [saving, setSaving]                 = useState(false)
 
   function handleHasCostChange(checked: boolean) {
     setHasCost(checked)
@@ -332,14 +339,12 @@ function ActivityEditForm({ initial, onSave, onCancel }: ActivityEditFormProps) 
     }
   }
 
-  function handleSave() {
+  async function handleSave() {
     if (!activityDate || !content.trim()) {
       alert('활동일과 활동내용은 필수입니다.')
       return
     }
-    const photoName = photoFile ? photoFile.name : initial.photoName
-    const photoUrl  = photoFile ? URL.createObjectURL(photoFile) : initial.photoUrl
-    if (!photoName) {
+    if (!photoFile && !initial.photoName) {
       alert('활동 사진은 필수입니다. 새 파일을 업로드하거나 기존 사진이 있어야 합니다.')
       return
     }
@@ -356,21 +361,28 @@ function ActivityEditForm({ initial, onSave, onCancel }: ActivityEditFormProps) 
     }
 
     const costAmount  = hasCost ? (parseInt(costAmountRaw.replace(/,/g, ''), 10) || 0) : 0
-    const receiptName = !hasCost ? '' : (receiptFile ? receiptFile.name  : initial.receiptName)
-    const receiptUrl  = !hasCost ? '' : (receiptFile ? URL.createObjectURL(receiptFile) : initial.receiptUrl)
-
-    onSave({
+    // Pass existing names/urls as fallback; dbUpdateActivity will overwrite if new files given
+    const updatedEntry: ActivityEntry = {
       id: initial.id,
       activityDate,
       content,
       memo,
       hasCost,
       costAmount,
-      photoName,
-      photoUrl,
-      receiptName,
-      receiptUrl,
-    })
+      photoName:   photoFile ? photoFile.name : initial.photoName,
+      photoUrl:    initial.photoUrl,
+      receiptName: !hasCost ? '' : (receiptFile ? receiptFile.name : initial.receiptName),
+      receiptUrl:  !hasCost ? '' : initial.receiptUrl,
+    }
+
+    setSaving(true)
+    try {
+      await onSave(updatedEntry, photoFile ?? undefined, receiptFile ?? undefined)
+    } catch {
+      alert('수정 중 오류가 발생했습니다. 다시 시도해주세요.')
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -480,13 +492,13 @@ function ActivityEditForm({ initial, onSave, onCancel }: ActivityEditFormProps) 
       </div>
 
       <div className="flex justify-end gap-2 pt-1">
-        <button onClick={onCancel}
-          className="px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">
+        <button onClick={onCancel} disabled={saving}
+          className="px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded-lg disabled:opacity-50">
           취소
         </button>
-        <button onClick={handleSave}
-          className="px-4 py-1.5 text-sm bg-amber-600 text-white rounded-lg hover:bg-amber-700 font-medium">
-          수정 저장
+        <button onClick={handleSave} disabled={saving}
+          className="px-4 py-1.5 text-sm bg-amber-600 text-white rounded-lg hover:bg-amber-700 font-medium disabled:opacity-50">
+          {saving ? '저장 중...' : '수정 저장'}
         </button>
       </div>
     </div>
@@ -503,8 +515,8 @@ interface MonthCardProps {
   startDate:          string
   currentMonthIndex:  number
   uploadBlocked:      boolean
-  onAddActivity:      (entry: Omit<ActivityEntry, 'id'>) => void
-  onUpdateActivity:   (updated: ActivityEntry) => void
+  onAddActivity:      (entry: Omit<ActivityEntry, 'id'>, photoFile: File, receiptFile?: File) => Promise<void>
+  onUpdateActivity:   (updated: ActivityEntry, photoFile?: File, receiptFile?: File) => Promise<void>
 }
 
 function MonthCard({ monthData, monthIndex, startDate, currentMonthIndex, uploadBlocked, onAddActivity, onUpdateActivity }: MonthCardProps) {
@@ -521,13 +533,13 @@ function MonthCard({ monthData, monthIndex, startDate, currentMonthIndex, upload
   const isFuture  = currentMonthIndex < monthIndex
   const isFull    = total >= 5
 
-  function handleSave(entry: Omit<ActivityEntry, 'id'>) {
-    onAddActivity(entry)
+  async function handleSave(entry: Omit<ActivityEntry, 'id'>, photoFile: File, receiptFile?: File) {
+    await onAddActivity(entry, photoFile, receiptFile)
     setShowForm(false)
   }
 
-  function handleUpdate(updated: ActivityEntry) {
-    onUpdateActivity(updated)
+  async function handleUpdate(updated: ActivityEntry, photoFile?: File, receiptFile?: File) {
+    await onUpdateActivity(updated, photoFile, receiptFile)
     setEditingId(null)
   }
 
@@ -722,61 +734,65 @@ export default function MentorPage() {
   const params = useParams()
   const token  = typeof params.token === 'string' ? params.token : ''
 
-  const [record, setRecord] = useState<MentoringRecord | null>(() => {
-    const found = INITIAL_DATA.find(r => r.token === token)
-    return found ?? null
-  })
+  const [record, setRecord] = useState<MentoringRecord | null>(null)
 
   // null=loading, false=show goal screen, true=show main
   const [goalsDone, setGoalsDone] = useState<boolean | null>(null)
 
+  // Fetch record from Supabase on mount
   useEffect(() => {
-    if (!record) { setGoalsDone(true); return }
-    const key = `mentor_goals_${record.token}`
-    try {
-      const stored = localStorage.getItem(key)
-      if (stored) {
-        const parsed: MentoringGoals = JSON.parse(stored)
-        if (parsed.savedAt) {
-          setRecord(prev => prev ? { ...prev, goals: parsed } : prev)
-          setGoalsDone(true)
-          return
+    if (!token) { setGoalsDone(true); return }
+    fetchMentorByToken(token)
+      .then(r => {
+        setRecord(r)
+        if (r) {
+          updateLastAccess(r.id, TODAY).catch(console.error)
+          setGoalsDone(r.goals.savedAt ? true : false)
+        } else {
+          setGoalsDone(true) // show not-found
         }
-      }
-    } catch { /* ignore */ }
-    setGoalsDone(record.goals.savedAt ? true : false)
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+      })
+      .catch(err => {
+        console.error('[fetchMentorByToken]', err)
+        setGoalsDone(true)
+      })
+  }, [token]) // eslint-disable-line react-hooks/exhaustive-deps
 
   function handleGoalSave(goals: MentoringGoals) {
     if (!record) return
-    try { localStorage.setItem(`mentor_goals_${record.token}`, JSON.stringify(goals)) } catch { /* ignore */ }
     setRecord(prev => prev ? { ...prev, goals } : prev)
     setGoalsDone(true)
+    saveGoals(record.id, goals).catch(console.error)
   }
 
-  function addActivity(monthIndex: 1 | 2 | 3, entry: Omit<ActivityEntry, 'id'>) {
-    const newActivity: ActivityEntry = { id: `act_${Date.now()}`, ...entry }
+  async function addActivity(monthIndex: 1 | 2 | 3, entry: Omit<ActivityEntry, 'id'>, photoFile: File, receiptFile?: File) {
+    if (!record) return
+    const tempId = `act_${Date.now()}`
+    const fullEntry: ActivityEntry = { id: tempId, ...entry }
+    const saved = await dbInsertActivity(record.id, monthIndex, fullEntry, photoFile, receiptFile)
     setRecord(prev => {
       if (!prev) return prev
       return {
         ...prev,
         months: prev.months.map(m =>
           m.monthIndex === monthIndex
-            ? { ...m, activities: m.activities.length < 5 ? [...m.activities, newActivity] : m.activities }
+            ? { ...m, activities: m.activities.length < 5 ? [...m.activities, saved] : m.activities }
             : m,
         ),
       }
     })
   }
 
-  function updateActivity(monthIndex: 1 | 2 | 3, updated: ActivityEntry) {
+  async function updateActivity(monthIndex: 1 | 2 | 3, updated: ActivityEntry, photoFile?: File, receiptFile?: File) {
+    if (!record) return
+    const saved = await dbUpdateActivity(record.id, updated, photoFile, receiptFile)
     setRecord(prev => {
       if (!prev) return prev
       return {
         ...prev,
         months: prev.months.map(m =>
           m.monthIndex === monthIndex
-            ? { ...m, activities: m.activities.map(a => a.id === updated.id ? updated : a) }
+            ? { ...m, activities: m.activities.map(a => a.id === saved.id ? saved : a) }
             : m,
         ),
       }
@@ -952,8 +968,8 @@ export default function MentorPage() {
               startDate={record.startDate}
               currentMonthIndex={currentMI}
               uploadBlocked={isBlocked}
-              onAddActivity={entry => addActivity(mi, entry)}
-              onUpdateActivity={updated => updateActivity(mi, updated)}
+              onAddActivity={(entry, photoFile, receiptFile) => addActivity(mi, entry, photoFile, receiptFile)}
+              onUpdateActivity={(updated, photoFile, receiptFile) => updateActivity(mi, updated, photoFile, receiptFile)}
             />
           )
         })}
