@@ -747,6 +747,12 @@ export default function MentorPage() {
   } | null>(null)
   const [deleting, setDeleting] = useState(false)
 
+  // ── 목표 수정 상태
+  const [goalsEditing, setGoalsEditing]             = useState(false)
+  const [editExpectations, setEditExpectations]     = useState<[string,string,string]>(['','',''])
+  const [editCooperation, setEditCooperation]       = useState<[string,string,string]>(['','',''])
+  const [goalsSaving, setGoalsSaving]               = useState(false)
+
   const showToast = useCallback((message: string, type: 'success' | 'error' = 'error') => {
     setToast({ message, type })
   }, [])
@@ -811,6 +817,34 @@ export default function MentorPage() {
         ),
       }
     })
+  }
+
+  function startGoalsEdit() {
+    if (!record) return
+    setEditExpectations([...record.goals.expectations] as [string,string,string])
+    setEditCooperation([...record.goals.cooperation]   as [string,string,string])
+    setGoalsEditing(true)
+  }
+
+  async function saveGoalsEdit() {
+    if (!record) return
+    const newGoals: MentoringGoals = {
+      expectations: editExpectations,
+      cooperation:  editCooperation,
+      savedAt:      record.goals.savedAt ?? TODAY,
+    }
+    setGoalsSaving(true)
+    try {
+      await saveGoals(record.id, newGoals)
+      setRecord(prev => prev ? { ...prev, goals: newGoals } : prev)
+      setGoalsEditing(false)
+      showToast('목표가 저장되었습니다.', 'success')
+    } catch (err) {
+      console.error('[saveGoalsEdit]', err)
+      showToast('저장 중 오류가 발생했습니다. 다시 시도해주세요.', 'error')
+    } finally {
+      setGoalsSaving(false)
+    }
   }
 
   function triggerDelete(monthIndex: 1 | 2 | 3, activity: ActivityEntry) {
@@ -953,34 +987,113 @@ export default function MentorPage() {
 
         {/* 목표 요약 */}
         {record.goals.savedAt && (
-          <div className="bg-indigo-50 border border-indigo-200 rounded-xl px-5 py-4">
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-sm font-semibold text-indigo-800">🎯 설정된 멘토링 목표</h2>
-              <span className="text-xs text-indigo-400">작성일: {record.goals.savedAt}</span>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <p className="text-xs font-medium text-indigo-600 mb-1.5">기대사항 (멘티)</p>
-                <ul className="space-y-1">
-                  {record.goals.expectations.filter(v => v.trim()).map((v, i) => (
-                    <li key={i} className="text-xs text-indigo-700 flex gap-1.5">
-                      <span className="text-indigo-400">{i + 1}.</span>{v}
-                    </li>
-                  ))}
-                </ul>
+          goalsEditing ? (
+            /* ── 수정 모드 ── */
+            <div className="bg-indigo-50 border-2 border-indigo-400 rounded-xl px-5 py-4">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-sm font-semibold text-indigo-800">✏️ 멘토링 목표 수정</h2>
+                <span className="text-xs text-indigo-400">작성일: {record.goals.savedAt}</span>
               </div>
-              <div>
-                <p className="text-xs font-medium text-green-600 mb-1.5">협력사항 (멘토)</p>
-                <ul className="space-y-1">
-                  {record.goals.cooperation.filter(v => v.trim()).map((v, i) => (
-                    <li key={i} className="text-xs text-green-700 flex gap-1.5">
-                      <span className="text-green-400">{i + 1}.</span>{v}
-                    </li>
-                  ))}
-                </ul>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <p className="text-xs font-medium text-indigo-600 mb-2">기대사항 (멘티)</p>
+                  <div className="space-y-2">
+                    {([0,1,2] as const).map(i => (
+                      <div key={i} className="flex items-start gap-2">
+                        <span className="mt-2 text-xs text-indigo-400 w-4 flex-shrink-0">{i+1}.</span>
+                        <input
+                          type="text"
+                          value={editExpectations[i]}
+                          onChange={e => {
+                            const next = [...editExpectations] as [string,string,string]
+                            next[i] = e.target.value
+                            setEditExpectations(next)
+                          }}
+                          className="flex-1 border border-indigo-300 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-300 bg-white"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <p className="text-xs font-medium text-green-600 mb-2">협력사항 (멘토)</p>
+                  <div className="space-y-2">
+                    {([0,1,2] as const).map(i => (
+                      <div key={i} className="flex items-start gap-2">
+                        <span className="mt-2 text-xs text-green-400 w-4 flex-shrink-0">{i+1}.</span>
+                        <input
+                          type="text"
+                          value={editCooperation[i]}
+                          onChange={e => {
+                            const next = [...editCooperation] as [string,string,string]
+                            next[i] = e.target.value
+                            setEditCooperation(next)
+                          }}
+                          className="flex-1 border border-green-300 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-green-300 bg-white"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <div className="flex justify-end gap-2 mt-4 pt-3 border-t border-indigo-200">
+                <button
+                  onClick={() => setGoalsEditing(false)}
+                  disabled={goalsSaving}
+                  className="px-3 py-1.5 text-sm text-gray-600 hover:bg-indigo-100 rounded-lg disabled:opacity-50"
+                >
+                  취소
+                </button>
+                <button
+                  onClick={saveGoalsEdit}
+                  disabled={goalsSaving}
+                  className="px-4 py-1.5 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium disabled:opacity-50"
+                >
+                  {goalsSaving ? '저장 중...' : '저장'}
+                </button>
               </div>
             </div>
-          </div>
+          ) : (
+            /* ── 보기 모드 ── */
+            <div className="bg-indigo-50 border border-indigo-200 rounded-xl px-5 py-4">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-sm font-semibold text-indigo-800">🎯 설정된 멘토링 목표</h2>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-indigo-400">작성일: {record.goals.savedAt}</span>
+                  {!isBlocked && (
+                    <button
+                      onClick={startGoalsEdit}
+                      className="text-xs px-2.5 py-1 rounded-lg border border-indigo-300 text-indigo-600 hover:bg-indigo-100 transition-colors"
+                    >
+                      수정
+                    </button>
+                  )}
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-xs font-medium text-indigo-600 mb-1.5">기대사항 (멘티)</p>
+                  <ul className="space-y-1">
+                    {record.goals.expectations.filter(v => v.trim()).map((v, i) => (
+                      <li key={i} className="text-xs text-indigo-700 flex gap-1.5">
+                        <span className="text-indigo-400">{i + 1}.</span>{v}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                <div>
+                  <p className="text-xs font-medium text-green-600 mb-1.5">협력사항 (멘토)</p>
+                  <ul className="space-y-1">
+                    {record.goals.cooperation.filter(v => v.trim()).map((v, i) => (
+                      <li key={i} className="text-xs text-green-700 flex gap-1.5">
+                        <span className="text-green-400">{i + 1}.</span>{v}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            </div>
+          )
         )}
 
         {/* 요약 바 */}

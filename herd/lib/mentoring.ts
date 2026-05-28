@@ -654,7 +654,7 @@ export function generateEndMailHtml(record: MentoringRecord): string {
 // 메일 발송 API 스텁
 // ─────────────────────────────────────────────────────────────────────────────
 
-export async function sendInitialGuideMail(record: MentoringRecord): Promise<void> {
+export async function sendInitialGuideMail(record: MentoringRecord, cc?: string): Promise<void> {
   const origin = typeof window !== 'undefined' ? window.location.origin : ''
   const link   = `${origin}/mentor/${record.token}`
   await fetch('/api/send-mail', {
@@ -662,6 +662,7 @@ export async function sendInitialGuideMail(record: MentoringRecord): Promise<voi
     headers: { 'Content-Type': 'application/json' },
     body:    JSON.stringify({
       to:      record.mentorEmail,
+      ...(cc ? { cc } : {}),
       subject: '멘토 선정 및 멘토링 프로그램 안내',
       text:    generateInitialGuideMailBody(record, link),
       html:    generateInitialGuideMailHtml(record, link),
@@ -669,12 +670,13 @@ export async function sendInitialGuideMail(record: MentoringRecord): Promise<voi
   }).catch(err => console.warn('[sendInitialGuideMail]', err))
 }
 
-export async function sendEndMail(record: MentoringRecord): Promise<void> {
+export async function sendEndMail(record: MentoringRecord, cc?: string): Promise<void> {
   await fetch('/api/send-mail', {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
     body:    JSON.stringify({
       to:      record.mentorEmail,
+      ...(cc ? { cc } : {}),
       subject: '멘토링 활동 등록 및 증빙 자료 제출 안내',
       text:    generateEndMailBody(record),
       html:    generateEndMailHtml(record),

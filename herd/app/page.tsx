@@ -235,6 +235,13 @@ export default function AdminDashboard() {
   const [mailSending, setMailSending]             = useState(false)
   const [selectedForMail, setSelectedForMail]     = useState<Set<string>>(new Set())
   const [bulkSending, setBulkSending]             = useState<'initial' | 'end' | null>(null)
+  const [extraCc, setExtraCc]                     = useState('')
+
+  const DEFAULT_CC = 'inno_hm@hecto.co.kr'
+  function buildCc(extra?: string): string {
+    const extras = (extra ?? extraCc).split(',').map(e => e.trim()).filter(Boolean)
+    return [DEFAULT_CC, ...extras].join(', ')
+  }
 
   // ── settlement
   const [settlementYM, setSettlementYM] = useState(TODAY.slice(0, 7))
@@ -464,20 +471,21 @@ export default function AdminDashboard() {
     if (!mailPreviewRecord) return
     setMailSending(true)
     try {
+      const cc = buildCc()
       if (mailPreviewType === 'initial') {
-        await sendInitialGuideMail(mailPreviewRecord)
+        await sendInitialGuideMail(mailPreviewRecord, cc)
         await patchMentor(mailPreviewRecord.id, { initial_mail_sent: true, initial_mail_sent_at: TODAY })
         setRecords(prev => prev.map(r => r.id === mailPreviewRecord.id
           ? { ...r, initialMailSent: true, initialMailSentAt: TODAY } : r))
       } else {
-        await sendEndMail(mailPreviewRecord)
+        await sendEndMail(mailPreviewRecord, cc)
         await patchMentor(mailPreviewRecord.id, { end_mail_sent: true, end_mail_sent_at: TODAY })
         setRecords(prev => prev.map(r => r.id === mailPreviewRecord.id
           ? { ...r, endMailSent: true, endMailSentAt: TODAY } : r))
       }
       alert('메일이 발송되었습니다.')
     } catch { alert('메일 발송에 실패했습니다.') }
-    finally { setMailSending(false); setMailPreviewRecord(null) }
+    finally { setMailSending(false); setMailPreviewRecord(null); setExtraCc('') }
   }
 
   function toggleMailSelect(id: string) {
@@ -502,7 +510,7 @@ export default function AdminDashboard() {
     if (!confirm(`${targets.length}명에게 초기 안내 메일을 발송하시겠습니까?`)) return
     setBulkSending('initial')
     try {
-      await Promise.allSettled(targets.map(r => sendInitialGuideMail(r)))
+      await Promise.allSettled(targets.map(r => sendInitialGuideMail(r, DEFAULT_CC)))
       await Promise.allSettled(targets.map(r => patchMentor(r.id, { initial_mail_sent: true, initial_mail_sent_at: TODAY })))
       setRecords(prev => prev.map(r =>
         selectedForMail.has(r.id)
@@ -520,7 +528,7 @@ export default function AdminDashboard() {
     if (!confirm(`${targets.length}명에게 종료 안내 메일을 발송하시겠습니까?`)) return
     setBulkSending('end')
     try {
-      await Promise.allSettled(targets.map(r => sendEndMail(r)))
+      await Promise.allSettled(targets.map(r => sendEndMail(r, DEFAULT_CC)))
       await Promise.allSettled(targets.map(r => patchMentor(r.id, { end_mail_sent: true, end_mail_sent_at: TODAY })))
       setRecords(prev => prev.map(r =>
         selectedForMail.has(r.id)
@@ -1239,11 +1247,29 @@ export default function AdminDashboard() {
               </div>
               <button onClick={() => setMailPreviewRecord(null)} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">×</button>
             </div>
-            <div className="px-4 py-4 max-h-[70vh] overflow-y-auto border border-gray-100 rounded-lg mx-6 bg-gray-50">
+            <div className="px-4 py-4 max-h-[55vh] overflow-y-auto border border-gray-100 rounded-lg mx-6 bg-gray-50">
               <div
                 dangerouslySetInnerHTML={{ __html: mailPreviewHtml }}
                 style={{ fontSize: '14px', lineHeight: '1.6' }}
               />
+            </div>
+            {/* CC 설정 */}
+            <div className="px-6 pt-3 pb-1 space-y-2">
+              <div className="flex items-center gap-3 text-sm">
+                <span className="text-gray-500 w-28 flex-shrink-0">기본 참조(CC)</span>
+                <span className="text-gray-700 font-medium bg-gray-100 px-3 py-1.5 rounded-lg text-xs">{DEFAULT_CC}</span>
+                <span className="text-xs text-gray-400">(제거 불가)</span>
+              </div>
+              <div className="flex items-center gap-3 text-sm">
+                <label className="text-gray-500 w-28 flex-shrink-0 text-sm">추가 참조(CC)</label>
+                <input
+                  type="text"
+                  value={extraCc}
+                  onChange={e => setExtraCc(e.target.value)}
+                  placeholder="abc@hecto.co.kr, def@hecto.co.kr"
+                  className="flex-1 border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+                />
+              </div>
             </div>
             <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-2">
               <button onClick={() => setMailPreviewRecord(null)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">닫기</button>

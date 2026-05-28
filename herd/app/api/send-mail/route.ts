@@ -3,7 +3,7 @@ import nodemailer from 'nodemailer'
 
 export async function POST(req: NextRequest) {
   try {
-    const { to, subject, text, html } = await req.json()
+    const { to, cc, subject, text, html } = await req.json()
     if (!to || !subject) {
       return NextResponse.json({ error: 'to, subject 필수' }, { status: 400 })
     }
@@ -21,6 +21,7 @@ export async function POST(req: NextRequest) {
     await transporter.sendMail({
       from: process.env.SMTP_FROM ?? process.env.SMTP_USER,
       to,
+      ...(cc ? { cc } : {}),
       subject,
       ...(html ? { html, text: text ?? '' } : { text: text ?? '' }),
     })
