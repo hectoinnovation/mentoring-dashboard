@@ -1,6 +1,6 @@
 /**
  * lib/mentoring-db.ts — Supabase CRUD for mentoring dashboard
- * mentors / activities 테이블 + mentoring-files Storage 연동
+ * mentoring_pairs / activities 테이블 + mentoring-files Storage 연동
  */
 import { supabase } from './supabase'
 import type {
@@ -119,7 +119,7 @@ function toRecord(m: DbMentor, acts: DbActivity[]): MentoringRecord {
 
 export async function fetchAllMentors(): Promise<MentoringRecord[]> {
   const [{ data: mentors, error: mErr }, { data: activities, error: aErr }] = await Promise.all([
-    supabase.from('mentors').select('*').order('created_at', { ascending: true }),
+    supabase.from('mentoring_pairs').select('*').order('created_at', { ascending: true }),
     supabase.from('activities').select('*').order('created_at', { ascending: true }),
   ])
   if (mErr) throw mErr
@@ -132,7 +132,7 @@ export async function fetchAllMentors(): Promise<MentoringRecord[]> {
 
 export async function fetchMentorByToken(token: string): Promise<MentoringRecord | null> {
   const { data: mentor, error } = await supabase
-    .from('mentors')
+    .from('mentoring_pairs')
     .select('*')
     .eq('token', token)
     .maybeSingle()
@@ -179,7 +179,7 @@ export async function insertMentor(r: MentoringRecord): Promise<void> {
     deleted_at:           r.deletedAt,
   }
   console.log('[insertMentor] payload:', payload)
-  const { error } = await supabase.from('mentors').insert(payload)
+  const { error } = await supabase.from('mentoring_pairs').insert(payload)
   if (error) {
     console.error('[insertMentor] Supabase error:', error)
     throw error
@@ -211,7 +211,7 @@ export type MentorPatch = Partial<{
 }>
 
 export async function patchMentor(id: string, fields: MentorPatch): Promise<void> {
-  const { error } = await supabase.from('mentors').update(fields).eq('id', id)
+  const { error } = await supabase.from('mentoring_pairs').update(fields).eq('id', id)
   if (error) throw error
 }
 
