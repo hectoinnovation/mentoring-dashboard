@@ -236,6 +236,8 @@ export default function AdminDashboard() {
   const [selectedForMail, setSelectedForMail]     = useState<Set<string>>(new Set())
   const [bulkSending, setBulkSending]             = useState<'initial' | 'end' | null>(null)
   const [mailCc, setMailCc] = useState('inno_hm@hecto.co.kr')
+  const [bulkConfirmType, setBulkConfirmType] = useState<'initial' | 'end' | null>(null)
+  const [bulkConfirmTargets, setBulkConfirmTargets] = useState<MentoringRecord[]>([])
 
   // ── settlement
   const [settlementYM, setSettlementYM] = useState(TODAY.slice(0, 7))
@@ -498,41 +500,55 @@ export default function AdminDashboard() {
     }
   }
 
-  async function bulkSendInitial() {
+  function bulkSendInitial() {
     const targets = visible.filter(r => selectedForMail.has(r.id))
     if (!targets.length) { alert('선택된 멘토가 없습니다.'); return }
-    if (!confirm(`${targets.length}명에게 초기 안내 메일을 발송하시겠습니까?`)) return
+    setBulkConfirmTargets(targets)
+    setBulkConfirmType('initial')
+  }
+
+  function bulkSendEnd() {
+    const targets = visible.filter(r => selectedForMail.has(r.id))
+    if (!targets.length) { alert('선택된 멘토가 없습니다.'); return }
+    setBulkConfirmTargets(targets)
+    setBulkConfirmType('end')
+  }
+
+  async function executeBulkInitial() {
+    const validTargets = bulkConfirmTargets.filter(r => r.mentorEmail.trim())
+    if (!validTargets.length) { alert('유효한 이메일이 없습니다.'); return }
+    setBulkConfirmType(null)
     setBulkSending('initial')
     try {
-      await Promise.allSettled(targets.map(r => sendInitialGuideMail(r, mailCc.trim() || 'inno_hm@hecto.co.kr')))
-      await Promise.allSettled(targets.map(r => patchMentor(r.id, { initial_mail_sent: true, initial_mail_sent_at: TODAY })))
+      await Promise.allSettled(validTargets.map(r => sendInitialGuideMail(r, mailCc.trim() || 'inno_hm@hecto.co.kr')))
+      await Promise.allSettled(validTargets.map(r => patchMentor(r.id, { initial_mail_sent: true, initial_mail_sent_at: TODAY })))
       setRecords(prev => prev.map(r =>
-        selectedForMail.has(r.id)
+        validTargets.some(t => t.id === r.id)
           ? { ...r, initialMailSent: true, initialMailSentAt: TODAY }
           : r,
       ))
       setSelectedForMail(new Set())
-      alert(`${targets.length}건 발송 완료`)
+      alert(`${validTargets.length}건 발송 완료`)
     } finally { setBulkSending(null) }
   }
 
-  async function bulkSendEnd() {
-    const targets = visible.filter(r => selectedForMail.has(r.id))
-    if (!targets.length) { alert('선택된 멘토가 없습니다.'); return }
-    if (!confirm(`${targets.length}명 수신자에게 종료 안내 메일을 1건으로 발송하시겠습니까?`)) return
+  async function executeBulkEnd() {
+    const validTargets = bulkConfirmTargets.filter(r => r.mentorEmail.trim())
+    if (!validTargets.length) { alert('유효한 이메일이 없습니다.'); return }
+    setBulkConfirmType(null)
     setBulkSending('end')
     try {
-      const emails = targets.map(r => r.mentorEmail)
+      const emails = validTargets.map(r => r.mentorEmail)
       const cc = mailCc.trim() || 'inno_hm@hecto.co.kr'
       await sendBulkEndMail(emails, cc)
-      await Promise.allSettled(targets.map(r => patchMentor(r.id, { end_mail_sent: true, end_mail_sent_at: TODAY })))
+      await Promise.allSettled(validTargets.map(r => patchMentor(r.id, { end_mail_sent: true, end_mail_sent_at: TODAY })))
       setRecords(prev => prev.map(r =>
-        selectedForMail.has(r.id)
+        validTargets.some(t => t.id === r.id)
           ? { ...r, endMailSent: true, endMailSentAt: TODAY }
           : r,
       ))
       setSelectedForMail(new Set())
-      alert(`종료 안내 메일을 ${targets.length}명 수신자에게 1건 발송 완료`)
+      alert(`종료 안내 메일을 ${validTargets.length}명 수신자에게 1건 발송 완료`)
     } finally { setBulkSending(null) }
   }
 
@@ -1229,6 +1245,87 @@ export default function AdminDashboard() {
           </div>
         </div>
       )}
+
+      {/* Bulk Mail Confirm Modal */}
+      {bulkConfirmType && (() => {
+        const isInitial = bulkConfirmType === 'initial'
+        const withEmail = bulkConfirmTargets.filter(r => r.mentorEmail.trim())
+        const noEmail   = bulkConfirmTargets.filter(r => !r.mentorEmail.trim())
+        const cc        = mailCc.trim() || 'inno_hm@hecto.co.kr'
+        return (
+          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-xl w-full max-w-md shadow-2xl flex flex-col max-h-[85vh]">
+              {/* Header */}
+              <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
+                <div>
+                  <h3 className="font-bold text-gray-800">
+                    {isInitial ? '초기 안내 메일' : '종료 안내 메일'} 발송 확인
+                  </h3>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    발송 방식: {isInitial ? '개별 발송' : '통합 1건 발송'}
+                  </p>
+                </div>
+                <button onClick={() => setBulkConfirmType(null)} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">×</button>
+              </div>
+              {/* Body */}
+              <div className="px-6 py-4 overflow-y-auto flex-1">
+                {!isInitial && (
+                  <div className="mb-3 flex items-center gap-2 text-sm">
+                    <span className="font-medium text-gray-500 w-6 flex-shrink-0">CC</span>
+                    <span className="text-gray-700 break-all">{cc}</span>
+                  </div>
+                )}
+                <div className="flex items-center gap-2 mb-3">
+                  <span className="text-sm font-medium text-gray-700">
+                    {isInitial
+                      ? `발송 건수: ${withEmail.length}건`
+                      : `총 수신자: ${withEmail.length}명`}
+                  </span>
+                  {noEmail.length > 0 && (
+                    <span className="text-xs text-red-500 bg-red-50 rounded-full px-2 py-0.5">
+                      이메일 없는 대상자는 제외됩니다.
+                    </span>
+                  )}
+                </div>
+                <div className="border border-gray-200 rounded-lg overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-gray-50 border-b border-gray-200">
+                        <th className="text-left px-3 py-2 text-gray-600 font-medium">멘토명</th>
+                        <th className="text-left px-3 py-2 text-gray-600 font-medium">멘토 이메일</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {bulkConfirmTargets.map(r => {
+                        const hasEmail = r.mentorEmail.trim()
+                        return (
+                          <tr key={r.id} className={`border-b border-gray-100 last:border-0 ${!hasEmail ? 'bg-red-50' : ''}`}>
+                            <td className={`px-3 py-2 ${!hasEmail ? 'text-red-500' : 'text-gray-700'}`}>{r.mentorName}</td>
+                            <td className={`px-3 py-2 ${!hasEmail ? 'text-red-400 italic' : 'text-gray-500'}`}>
+                              {hasEmail || '(이메일 없음)'}
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              {/* Footer */}
+              <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-2 flex-shrink-0">
+                <button onClick={() => setBulkConfirmType(null)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">취소</button>
+                <button
+                  onClick={isInitial ? executeBulkInitial : executeBulkEnd}
+                  disabled={withEmail.length === 0}
+                  className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                >
+                  발송하기
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
 
       {/* Mail Preview */}
       {mailPreviewRecord && (
