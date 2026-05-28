@@ -10,7 +10,7 @@ import {
   getMonthlyPayment, getMonthActualCost, getMonthPaymentLimit,
   fmtAmount,
   generateInitialGuideMailHtml, generateEndMailHtml,
-  sendInitialGuideMail, sendEndMail,
+  sendInitialGuideMail, sendEndMail, sendBulkEndMail,
   getMentoringProgress,
 } from '@/lib/mentoring'
 import {
@@ -457,7 +457,7 @@ export default function AdminDashboard() {
       : `https://mentoring-dashboard-lilac.vercel.app/mentor/${mailPreviewRecord.token}`
     return mailPreviewType === 'initial'
       ? generateInitialGuideMailHtml(mailPreviewRecord, link)
-      : generateEndMailHtml(mailPreviewRecord)
+      : generateEndMailHtml()
   }, [mailPreviewRecord, mailPreviewType])
 
 
@@ -519,10 +519,12 @@ export default function AdminDashboard() {
   async function bulkSendEnd() {
     const targets = visible.filter(r => selectedForMail.has(r.id))
     if (!targets.length) { alert('선택된 멘토가 없습니다.'); return }
-    if (!confirm(`${targets.length}명에게 종료 안내 메일을 발송하시겠습니까?`)) return
+    if (!confirm(`${targets.length}명 수신자에게 종료 안내 메일을 1건으로 발송하시겠습니까?`)) return
     setBulkSending('end')
     try {
-      await Promise.allSettled(targets.map(r => sendEndMail(r, mailCc.trim() || 'inno_hm@hecto.co.kr')))
+      const emails = targets.map(r => r.mentorEmail)
+      const cc = mailCc.trim() || 'inno_hm@hecto.co.kr'
+      await sendBulkEndMail(emails, cc)
       await Promise.allSettled(targets.map(r => patchMentor(r.id, { end_mail_sent: true, end_mail_sent_at: TODAY })))
       setRecords(prev => prev.map(r =>
         selectedForMail.has(r.id)
@@ -530,7 +532,7 @@ export default function AdminDashboard() {
           : r,
       ))
       setSelectedForMail(new Set())
-      alert(`${targets.length}건 발송 완료`)
+      alert(`종료 안내 메일을 ${targets.length}명 수신자에게 1건 발송 완료`)
     } finally { setBulkSending(null) }
   }
 

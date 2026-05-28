@@ -495,8 +495,7 @@ export function generateInitialGuideMailHtml(record: MentoringRecord, link: stri
 </html>`
 }
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-export function generateEndMailBody(record: MentoringRecord): string {
+export function generateEndMailBody(): string {
   return `안녕하세요.
 인재협업팀입니다.
 
@@ -541,8 +540,7 @@ export function generateEndMailBody(record: MentoringRecord): string {
 인재협업팀 드림`
 }
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-export function generateEndMailHtml(record: MentoringRecord): string {
+export function generateEndMailHtml(): string {
   return `<!DOCTYPE html>
 <html lang="ko">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head>
@@ -678,10 +676,25 @@ export async function sendEndMail(record: MentoringRecord, cc?: string): Promise
       to:      record.mentorEmail,
       ...(cc ? { cc } : {}),
       subject: '멘토링 활동 등록 및 증빙 자료 제출 안내',
-      text:    generateEndMailBody(record),
-      html:    generateEndMailHtml(record),
+      text:    generateEndMailBody(),
+      html:    generateEndMailHtml(),
     }),
   }).catch(err => console.warn('[sendEndMail]', err))
+}
+
+export async function sendBulkEndMail(emails: string[], cc?: string): Promise<void> {
+  if (emails.length === 0) return
+  await fetch('/api/send-mail', {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({
+      to:      emails.join(', '),
+      ...(cc ? { cc } : {}),
+      subject: '멘토링 활동 등록 및 증빙 자료 제출 안내',
+      text:    generateEndMailBody(),
+      html:    generateEndMailHtml(),
+    }),
+  }).catch(err => console.warn('[sendBulkEndMail]', err))
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
