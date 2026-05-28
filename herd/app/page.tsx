@@ -315,6 +315,10 @@ export default function AdminDashboard() {
       alert('멘토명, 멘토 이메일, 멘티명, 입사일, 입사월은 필수입니다.')
       return
     }
+    if (!form.startDate || !form.endDate) {
+      alert('입사일 또는 입사월을 다시 입력해주세요. (활동 기간이 자동 계산되지 않았습니다.)')
+      return
+    }
     setSaving(true)
     try {
       if (editingId) {
@@ -363,7 +367,9 @@ export default function AdminDashboard() {
       setShowAddEdit(false)
     } catch (err) {
       console.error('[saveForm]', err)
-      alert('저장 중 오류가 발생했습니다. 다시 시도해주세요.')
+      const e = err as { message?: string; details?: string; code?: string; hint?: string }
+      const detail = [e.message, e.details, e.hint ? `힌트: ${e.hint}` : '', e.code ? `코드: ${e.code}` : ''].filter(Boolean).join('\n')
+      alert(`저장 중 오류가 발생했습니다.\n\n${detail || String(err)}`)
     } finally {
       setSaving(false)
     }
@@ -380,7 +386,8 @@ export default function AdminDashboard() {
       ))
     } catch (err) {
       console.error('[confirmDelete]', err)
-      alert('삭제 중 오류가 발생했습니다.')
+      const e = err as { message?: string }
+      alert(`삭제 중 오류가 발생했습니다.\n${e.message ?? String(err)}`)
     }
     setDeleteTargetId(null)
   }
@@ -394,7 +401,8 @@ export default function AdminDashboard() {
         ))
       } catch (err) {
         console.error('[toggleBlock]', err)
-        alert('차단 해제 중 오류가 발생했습니다.')
+        const e = err as { message?: string }
+        alert(`차단 해제 중 오류가 발생했습니다.\n${e.message ?? String(err)}`)
       }
     } else {
       setBlockReasonPreset('멘티 퇴사')
@@ -415,7 +423,8 @@ export default function AdminDashboard() {
       ))
     } catch (err) {
       console.error('[confirmBlock]', err)
-      alert('차단 중 오류가 발생했습니다.')
+      const e = err as { message?: string }
+      alert(`차단 중 오류가 발생했습니다.\n${e.message ?? String(err)}`)
     }
     setBlockTargetId(null)
   }

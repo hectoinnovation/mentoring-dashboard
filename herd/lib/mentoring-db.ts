@@ -152,7 +152,7 @@ export async function fetchMentorByToken(token: string): Promise<MentoringRecord
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function insertMentor(r: MentoringRecord): Promise<void> {
-  const { error } = await supabase.from('mentors').insert({
+  const payload = {
     id:                   r.id,
     mentor_name:          r.mentorName,
     mentor_email:         r.mentorEmail,
@@ -177,8 +177,13 @@ export async function insertMentor(r: MentoringRecord): Promise<void> {
     last_access_at:       r.lastAccessAt,
     created_at:           r.createdAt,
     deleted_at:           r.deletedAt,
-  })
-  if (error) throw error
+  }
+  console.log('[insertMentor] payload:', payload)
+  const { error } = await supabase.from('mentors').insert(payload)
+  if (error) {
+    console.error('[insertMentor] Supabase error:', error)
+    throw error
+  }
 }
 
 export type MentorPatch = Partial<{
