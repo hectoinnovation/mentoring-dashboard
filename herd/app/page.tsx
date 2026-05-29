@@ -37,6 +37,15 @@ function Chip({ label, color }: { label: string; color: string }) {
   return <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${color}`}>{label}</span>
 }
 
+function isImageFile(url: string): boolean {
+  const ext = url.split('?')[0].split('.').pop()?.toLowerCase() ?? ''
+  return ['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(ext)
+}
+function isPdfFile(url: string): boolean {
+  const ext = url.split('?')[0].split('.').pop()?.toLowerCase() ?? ''
+  return ext === 'pdf'
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Form state
 // ─────────────────────────────────────────────────────────────────────────────
@@ -242,6 +251,10 @@ export default function AdminDashboard() {
   // ── settlement
   const [settlementYM, setSettlementYM] = useState(TODAY.slice(0, 7))
   const [zipLoading, setZipLoading]     = useState(false)
+
+  // ── file preview
+  const [filePreviewRecord, setFilePreviewRecord] = useState<MentoringRecord | null>(null)
+  const [lightboxUrl, setLightboxUrl]             = useState<string | null>(null)
 
   // ─────────────────────────────────────────────────────────────────────────
   // Derived
@@ -830,6 +843,10 @@ export default function AdminDashboard() {
                               }`}>
                               {r.uploadStatus === 'blocked' ? '차단해제' : '업로드차단'}
                             </button>
+                            <button onClick={() => setFilePreviewRecord(r)}
+                              className="text-xs px-2.5 py-1 rounded bg-teal-50 hover:bg-teal-100 text-teal-700 whitespace-nowrap">
+                              사진/영수증
+                            </button>
                             <button onClick={() => setDeleteTargetId(r.id)}
                               className="text-xs px-2.5 py-1 rounded bg-red-50 hover:bg-red-100 text-red-600">
                               삭제
@@ -1376,6 +1393,156 @@ export default function AdminDashboard() {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* File Preview Modal */}
+      {filePreviewRecord && (() => {
+        const hasAnyFile = filePreviewRecord.months.some(md =>
+          md.activities.some(a => a.photoUrl || a.receiptUrl)
+        )
+        return (
+          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-xl w-full max-w-2xl shadow-2xl flex flex-col max-h-[90vh]">
+              {/* Header */}
+              <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
+                <div>
+                  <h3 className="font-bold text-gray-800">활동 사진 / 영수증 미리보기</h3>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    {filePreviewRecord.mentorName} → {filePreviewRecord.menteeName}
+                  </p>
+                </div>
+                <button onClick={() => setFilePreviewRecord(null)} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">×</button>
+              </div>
+              {/* Body */}
+              <div className="overflow-y-auto flex-1 px-6 py-4">
+                {!hasAnyFile ? (
+                  <div className="text-center py-14 text-gray-400">
+                    <div className="text-4xl mb-3">📂</div>
+                    <p>업로드된 파일이 없습니다.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-6">
+                    {filePreviewRecord.months.map(md => {
+                      const activitiesWithFiles = md.activities.filter(a => a.photoUrl || a.receiptUrl)
+                      if (activitiesWithFiles.length === 0) return null
+                      return (
+                        <div key={md.monthIndex}>
+                          <h4 className="text-sm font-semibold text-gray-700 mb-3 pb-1 border-b border-gray-100">
+                            {md.monthIndex}개월차&nbsp;
+                            <span className="font-normal text-gray-400">({getMonthYM(filePreviewRecord.startDate, md.monthIndex)})</span>
+                          </h4>
+                          <div className="space-y-3">
+                            {activitiesWithFiles.map(act => (
+                              <div key={act.id} className="bg-gray-50 rounded-lg p-3">
+                                <p className="text-xs text-gray-500 mb-3">
+                                  {act.activityDate}
+                                  {act.content && <span className="ml-2 text-gray-400">{act.content}</span>}
+                                  {act.hasCost && act.costAmount > 0 && (
+                                    <span className="ml-2 text-orange-500 font-medium">{act.costAmount.toLocaleString()}원</span>
+                                  )}
+                                </p>
+                                <div className="flex flex-wrap gap-4">
+                                  {/* 활동사진 */}
+                                  {act.photoUrl && (
+                                    <div className="flex flex-col gap-1.5">
+                                      <span className="text-xs font-medium text-gray-500">📷 활동사진</span>
+                                      {isImageFile(act.photoUrl) ? (
+                                        <button
+                                          onClick={() => setLightboxUrl(act.photoUrl)}
+                                          className="w-24 h-24 rounded-lg overflow-hidden border border-gray-200 hover:opacity-80 transition-opacity flex-shrink-0"
+                                        >
+                                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                                          <img src={act.photoUrl} alt="활동사진" className="w-full h-full object-cover" />
+                                        </button>
+                                      ) : isPdfFile(act.photoUrl) ? (
+                                        <a href={act.photoUrl} target="_blank" rel="noopener noreferrer"
+                                          className="flex items-center gap-1.5 text-xs px-3 py-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 border border-red-200 whitespace-nowrap">
+                                          📄 PDF 보기
+                                        </a>
+                                      ) : (
+                                        <a href={act.photoUrl} target="_blank" rel="noopener noreferrer"
+                                          className="text-xs text-blue-500 hover:underline truncate max-w-[96px]">
+                                          {act.photoName || '파일 보기'}
+                                        </a>
+                                      )}
+                                    </div>
+                                  )}
+                                  {/* 영수증 */}
+                                  {act.receiptUrl && (
+                                    <div className="flex flex-col gap-1.5">
+                                      <span className="text-xs font-medium text-gray-500">🧾 영수증</span>
+                                      {isImageFile(act.receiptUrl) ? (
+                                        <div className="flex flex-col gap-1">
+                                          <button
+                                            onClick={() => setLightboxUrl(act.receiptUrl)}
+                                            className="w-24 h-24 rounded-lg overflow-hidden border border-gray-200 hover:opacity-80 transition-opacity flex-shrink-0"
+                                          >
+                                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                                            <img src={act.receiptUrl} alt="영수증" className="w-full h-full object-cover" />
+                                          </button>
+                                          <a href={act.receiptUrl} download={act.receiptName || true}
+                                            className="text-xs text-blue-500 hover:underline text-center">
+                                            다운로드
+                                          </a>
+                                        </div>
+                                      ) : isPdfFile(act.receiptUrl) ? (
+                                        <div className="flex flex-col gap-1">
+                                          <a href={act.receiptUrl} target="_blank" rel="noopener noreferrer"
+                                            className="flex items-center gap-1.5 text-xs px-3 py-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 border border-red-200 whitespace-nowrap">
+                                            📄 PDF 보기
+                                          </a>
+                                          <a href={act.receiptUrl} download={act.receiptName || true}
+                                            className="text-xs text-blue-500 hover:underline text-center">
+                                            다운로드
+                                          </a>
+                                        </div>
+                                      ) : (
+                                        <a href={act.receiptUrl} download={act.receiptName || true}
+                                          className="text-xs text-blue-500 hover:underline truncate max-w-[96px]">
+                                          {act.receiptName || '다운로드'}
+                                        </a>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+              {/* Footer */}
+              <div className="px-6 py-4 border-t border-gray-100 flex justify-end flex-shrink-0">
+                <button onClick={() => setFilePreviewRecord(null)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">닫기</button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* Lightbox */}
+      {lightboxUrl && (
+        <div
+          className="fixed inset-0 bg-black/85 z-[60] flex items-center justify-center p-4"
+          onClick={() => setLightboxUrl(null)}
+        >
+          <button
+            className="absolute top-4 right-4 text-white text-4xl leading-none hover:opacity-70"
+            onClick={() => setLightboxUrl(null)}
+          >
+            ×
+          </button>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={lightboxUrl}
+            alt="미리보기"
+            className="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl"
+            onClick={e => e.stopPropagation()}
+          />
         </div>
       )}
     </div>
