@@ -50,6 +50,67 @@ function RemainingBadge({ valid }: { valid: number }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// FileUploadCard — 카드형 파일 첨부 박스
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface FileUploadCardProps {
+  label:             string
+  hint:              string
+  accept:            string
+  file:              File | null
+  existingFileName?: string   // 수정 폼: 기존 파일명
+  disabled?:         boolean
+  onChange:          (file: File | null) => void
+}
+
+function FileUploadCard({ label, hint, accept, file, existingFileName, disabled, onChange }: FileUploadCardProps) {
+  const isPhoto   = label.includes('사진')
+  const emptyIcon = isPhoto ? '📷' : '📋'
+  const doneIcon  = isPhoto ? '📸' : '🧾'
+
+  const cardClass = [
+    'w-full rounded-xl border-2 p-4 text-center transition-all',
+    disabled
+      ? 'border-gray-200 bg-gray-50 opacity-50 cursor-not-allowed'
+      : file
+        ? 'border-green-400 bg-green-50'
+        : 'border-dashed border-gray-300 bg-white hover:border-blue-400 hover:bg-blue-50',
+  ].join(' ')
+
+  return (
+    <div>
+      <label className={disabled ? 'block cursor-not-allowed' : 'block cursor-pointer'}>
+        <div className={cardClass}>
+          <div className="text-3xl mb-2">{file ? doneIcon : emptyIcon}</div>
+          {file ? (
+            <>
+              <p className="text-sm font-semibold text-green-700 break-all leading-relaxed">{file.name}</p>
+              <p className="text-xs text-green-500 mt-1">클릭하여 파일 변경</p>
+            </>
+          ) : (
+            <>
+              <p className="text-sm font-semibold text-gray-700">{label}</p>
+              <p className="text-xs text-orange-600 mt-1.5 leading-relaxed">{hint}</p>
+              <p className="text-xs text-blue-500 mt-2 font-medium">클릭하여 파일 선택</p>
+            </>
+          )}
+        </div>
+        <input
+          type="file" accept={accept} disabled={disabled} className="hidden"
+          onChange={e => onChange(e.target.files?.[0] ?? null)}
+        />
+      </label>
+      {existingFileName && !file && (
+        <p className="text-xs text-green-700 bg-green-50 border border-green-200 rounded-lg px-2.5 py-1.5 mt-1.5">
+          📎 현재 파일: <span className="font-medium">{existingFileName}</span>
+          <span className="text-green-500 ml-1">(새 파일 선택 시 교체됩니다)</span>
+        </p>
+      )}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Goal-setting screen (first visit)
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -229,16 +290,21 @@ function ActivityForm({ onSave, onCancel }: ActivityFormProps) {
           className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 bg-white resize-none" />
       </div>
 
+      {/* 활동 사진 */}
       <div>
-        <label className="block text-xs font-medium text-gray-600 mb-1">
+        <label className="block text-xs font-semibold text-gray-700 mb-1.5">
           활동 사진 <span className="text-red-500">*</span>
-          <span className="text-gray-400 font-normal ml-1">(사진 없으면 유효 활동 미인정)</span>
         </label>
-        <input type="file" accept="image/*" onChange={e => setPhotoFile(e.target.files?.[0] ?? null)}
-          className="w-full text-xs text-gray-600 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:bg-gray-100 file:text-gray-700 file:text-xs hover:file:bg-gray-200" />
-        {photoFile && <p className="text-xs text-green-600 mt-0.5">✓ {photoFile.name}</p>}
+        <FileUploadCard
+          label="활동 사진 첨부"
+          hint="활동 사진이 없으면 유효 활동으로 인정되지 않습니다."
+          accept="image/*"
+          file={photoFile}
+          onChange={setPhotoFile}
+        />
       </div>
 
+      {/* 비용 / 영수증 */}
       <div className="bg-white rounded-lg border border-gray-200 p-3 space-y-3">
         <div className="flex items-center gap-2">
           <input id="hasCost" type="checkbox" checked={hasCost} onChange={e => handleHasCostChange(e.target.checked)}
@@ -267,19 +333,18 @@ function ActivityForm({ onSave, onCancel }: ActivityFormProps) {
         </div>
 
         <div>
-          <label className={`block text-xs font-medium mb-1 ${hasCost ? 'text-gray-600' : 'text-gray-300'}`}>
+          <label className={`block text-xs font-semibold mb-1.5 ${hasCost ? 'text-gray-700' : 'text-gray-400'}`}>
             영수증{hasCost && <span className="text-red-500 ml-0.5">*</span>}
-            {!hasCost && <span className="ml-1 font-normal">(비활성화)</span>}
+            {!hasCost && <span className="ml-1 text-xs font-normal">(비용 사용 있음 체크 시 활성화)</span>}
           </label>
-          <input type="file" accept="image/*,application/pdf" disabled={!hasCost}
-            onChange={e => setReceiptFile(e.target.files?.[0] ?? null)}
-            className={`w-full text-xs file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-xs ${
-              hasCost
-                ? 'text-gray-600 file:bg-gray-100 file:text-gray-700 hover:file:bg-gray-200'
-                : 'text-gray-300 file:bg-gray-50 file:text-gray-300 opacity-50 cursor-not-allowed'
-            }`}
+          <FileUploadCard
+            label="영수증 첨부"
+            hint="비용 사용 시 사용 금액과 영수증 첨부가 필요합니다."
+            accept="image/*,application/pdf"
+            file={receiptFile}
+            onChange={setReceiptFile}
+            disabled={!hasCost}
           />
-          {receiptFile && hasCost && <p className="text-xs text-green-600 mt-0.5">✓ {receiptFile.name}</p>}
         </div>
       </div>
 
@@ -371,19 +436,22 @@ function ActivityEditForm({ initial, onSave, onCancel }: ActivityEditFormProps) 
           className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300 bg-white resize-none" />
       </div>
 
+      {/* 활동 사진 */}
       <div>
-        <label className="block text-xs font-medium text-gray-600 mb-1">활동 사진 <span className="text-red-500">*</span></label>
-        {initial.photoName && (
-          <p className="text-xs text-green-700 bg-green-50 rounded px-2 py-1 mb-1">현재 파일: {initial.photoName}</p>
-        )}
-        <input type="file" accept="image/*" onChange={e => setPhotoFile(e.target.files?.[0] ?? null)}
-          className="w-full text-xs text-gray-600 file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:bg-gray-100 file:text-gray-700 file:text-xs hover:file:bg-gray-200" />
-        {photoFile
-          ? <p className="text-xs text-green-600 mt-0.5">✓ 새 파일: {photoFile.name}</p>
-          : <p className="text-xs text-gray-400 mt-0.5">새 파일을 올리지 않으면 기존 사진이 유지됩니다.</p>
-        }
+        <label className="block text-xs font-semibold text-gray-700 mb-1.5">
+          활동 사진 <span className="text-red-500">*</span>
+        </label>
+        <FileUploadCard
+          label="활동 사진 첨부"
+          hint="활동 사진이 없으면 유효 활동으로 인정되지 않습니다."
+          accept="image/*"
+          file={photoFile}
+          existingFileName={initial.photoName || undefined}
+          onChange={setPhotoFile}
+        />
       </div>
 
+      {/* 비용 / 영수증 */}
       <div className="bg-white rounded-lg border border-gray-200 p-3 space-y-3">
         <div className="flex items-center gap-2">
           <input id={`hasCost-edit-${initial.id}`} type="checkbox" checked={hasCost}
@@ -413,25 +481,19 @@ function ActivityEditForm({ initial, onSave, onCancel }: ActivityEditFormProps) 
         </div>
 
         <div>
-          <label className={`block text-xs font-medium mb-1 ${hasCost ? 'text-gray-600' : 'text-gray-300'}`}>
+          <label className={`block text-xs font-semibold mb-1.5 ${hasCost ? 'text-gray-700' : 'text-gray-400'}`}>
             영수증{hasCost && <span className="text-red-500 ml-0.5">*</span>}
-            {!hasCost && <span className="ml-1 font-normal">(비활성화)</span>}
+            {!hasCost && <span className="ml-1 text-xs font-normal">(비용 사용 있음 체크 시 활성화)</span>}
           </label>
-          {hasCost && initial.receiptName && (
-            <p className="text-xs text-green-700 bg-green-50 rounded px-2 py-1 mb-1">현재 파일: {initial.receiptName}</p>
-          )}
-          <input type="file" accept="image/*,application/pdf" disabled={!hasCost}
-            onChange={e => setReceiptFile(e.target.files?.[0] ?? null)}
-            className={`w-full text-xs file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:text-xs ${
-              hasCost
-                ? 'text-gray-600 file:bg-gray-100 file:text-gray-700 hover:file:bg-gray-200'
-                : 'text-gray-300 file:bg-gray-50 file:text-gray-300 opacity-50 cursor-not-allowed'
-            }`}
+          <FileUploadCard
+            label="영수증 첨부"
+            hint="비용 사용 시 사용 금액과 영수증 첨부가 필요합니다."
+            accept="image/*,application/pdf"
+            file={receiptFile}
+            existingFileName={hasCost && initial.receiptName ? initial.receiptName : undefined}
+            onChange={setReceiptFile}
+            disabled={!hasCost}
           />
-          {receiptFile && hasCost
-            ? <p className="text-xs text-green-600 mt-0.5">✓ 새 파일: {receiptFile.name}</p>
-            : hasCost && <p className="text-xs text-gray-400 mt-0.5">새 파일을 올리지 않으면 기존 영수증이 유지됩니다.</p>
-          }
         </div>
       </div>
 
