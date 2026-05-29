@@ -670,7 +670,11 @@ function MonthCard({
                     </div>
 
                     {/* 수정 / 삭제 버튼 */}
-                    {!uploadBlocked && !isFuture && (
+                    {isPast ? (
+                      <span className="flex-shrink-0 text-xs text-gray-400 bg-gray-100 rounded-lg px-2 py-1 whitespace-nowrap">
+                        수정 기간 종료
+                      </span>
+                    ) : !uploadBlocked && !isFuture && (
                       <div className="flex-shrink-0 flex gap-1">
                         <button
                           onClick={() => setEditingId(isEditing ? null : a.id)}
@@ -718,7 +722,12 @@ function MonthCard({
         )}
 
         {/* Add button / form */}
-        {!isFuture && !uploadBlocked && (
+        {isPast && (
+          <p className="mt-3 text-xs text-gray-500 text-center bg-gray-100 rounded-lg px-3 py-2.5 border border-gray-200 font-medium">
+            🔒 등록 기간 종료 — 이전 월차 활동은 조회만 가능합니다
+          </p>
+        )}
+        {!isPast && !isFuture && !uploadBlocked && (
           <div className="mt-3">
             {showForm ? (
               <ActivityForm onSave={handleSave} onCancel={() => setShowForm(false)} />
@@ -735,7 +744,7 @@ function MonthCard({
         {isFuture && (
           <p className="mt-3 text-xs text-gray-400 text-center">아직 시작되지 않은 기간입니다</p>
         )}
-        {uploadBlocked && !isFuture && (
+        {uploadBlocked && !isFuture && !isPast && (
           <p className="mt-3 text-xs text-red-500 text-center bg-red-50 rounded-lg px-3 py-2 border border-red-100">
             현재 업로드가 차단되어 활동 등록 및 수정이 불가합니다. 인재협업팀에 문의해주세요.
           </p>
