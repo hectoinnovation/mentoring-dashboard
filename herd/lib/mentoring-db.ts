@@ -353,6 +353,36 @@ export async function dbDeleteActivity(activity: ActivityEntry): Promise<void> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Delete mentor (hard delete: storage → activities → mentor row)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function dbDeleteMentor(record: MentoringRecord): Promise<void> {
+  // 1) 스토리지 파일 삭제 (사진 + 영수증, best-effort)
+  const storagePaths: string[] = []
+  for (const month of record.months) {
+    for (const act of month.activities) {
+      if (act.photoUrl)   { const p = storagePathFromUrl(act.photoUrl);   if (p) storagePaths.push(p) }
+      if (act.receiptUrl) { const p = storagePathFromUrl(act.receiptUrl); if (p) storagePaths.push(p) }
+    }
+  }
+  if (storagePaths.length > 0) {
+    const { error: sErr } = await supabase.storage.from(BUCKET).remove(storagePaths)
+    if (sErr) console.warn('[dbDeleteMentor] storage remove error:', sErr)
+  }
+
+  // 2) activities 행 삭제 (FK cascade 없을 경우를 대비해 명시적으로 삭제)
+  const activityIds = record.months.flatMap(m => m.activities.map(a => a.id))
+  if (activityIds.length > 0) {
+    const { error: aErr } = await supabase.from('activities').delete().in('id', activityIds)
+    if (aErr) console.warn('[dbDeleteMentor] activities delete error:', aErr)
+  }
+
+  // 3) mentoring_pairs 행 삭제
+  const { error } = await supabase.from('mentoring_pairs').delete().eq('id', record.id)
+  if (error) throw error
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Goals & last access
 // ─────────────────────────────────────────────────────────────────────────────
 

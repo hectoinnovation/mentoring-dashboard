@@ -14,7 +14,7 @@ import {
   getMentoringProgress,
 } from '@/lib/mentoring'
 import {
-  fetchAllMentors, insertMentor, patchMentor,
+  fetchAllMentors, insertMentor, patchMentor, dbDeleteMentor,
 } from '@/lib/mentoring-db'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -396,13 +396,11 @@ export default function AdminDashboard() {
 
   async function confirmDelete() {
     if (!deleteTargetId) return
+    const record = records.find(r => r.id === deleteTargetId)
+    if (!record) { setDeleteTargetId(null); return }
     try {
-      await patchMentor(deleteTargetId, { status: 'deleted', deleted_at: TODAY })
-      setRecords(prev => prev.map(r =>
-        r.id === deleteTargetId
-          ? { ...r, status: 'deleted' as MentoringStatus, deletedAt: TODAY }
-          : r,
-      ))
+      await dbDeleteMentor(record)
+      setRecords(prev => prev.filter(r => r.id !== deleteTargetId))
     } catch (err) {
       console.error('[confirmDelete]', err)
       const e = err as { message?: string }
@@ -1174,7 +1172,7 @@ export default function AdminDashboard() {
                 </p>
               ) : null
             })()}
-            <p className="text-xs text-gray-400 mb-5">삭제 후 정산 화면에서 제외됩니다. (소프트 삭제)</p>
+            <p className="text-xs text-gray-400 mb-5">활동 기록 및 업로드 파일이 모두 삭제됩니다. 이 작업은 되돌릴 수 없습니다.</p>
             <div className="flex gap-2 justify-end">
               <button onClick={() => setDeleteTargetId(null)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">취소</button>
               <button onClick={confirmDelete} className="px-4 py-2 text-sm bg-red-600 text-white rounded-lg hover:bg-red-700">삭제</button>
