@@ -256,12 +256,6 @@ export default function AdminDashboard() {
   const [filePreviewRecord, setFilePreviewRecord] = useState<MentoringRecord | null>(null)
   const [lightboxUrl, setLightboxUrl]             = useState<string | null>(null)
 
-  // ── SMTP 테스트 / 테스트 발송
-  const [smtpTesting, setSmtpTesting]   = useState(false)
-  const [smtpStatus, setSmtpStatus]     = useState<{ ok: boolean; message?: string; error?: string; env?: Record<string, unknown> } | null>(null)
-  const [testMailTo, setTestMailTo]     = useState('asj0129@hecto.co.kr')
-  const [testMailSending, setTestMailSending] = useState(false)
-  const [testMailLogs, setTestMailLogs] = useState<{ time: string; ok: boolean; message: string }[]>([])
 
   // ─────────────────────────────────────────────────────────────────────────
   // Derived
@@ -568,57 +562,6 @@ export default function AdminDashboard() {
       setSelectedForMail(new Set())
       alert(`종료 안내 메일을 ${validTargets.length}명 수신자에게 1건 발송 완료`)
     } finally { setBulkSending(null) }
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // SMTP 테스트 / 테스트 발송
-  // ─────────────────────────────────────────────────────────────────────────
-
-  async function runSmtpTest() {
-    setSmtpTesting(true)
-    setSmtpStatus(null)
-    try {
-      const res  = await fetch('/api/test-smtp')
-      const data = await res.json()
-      setSmtpStatus({ ok: data.ok, message: data.message, error: data.error, env: data.env })
-    } catch (err) {
-      setSmtpStatus({ ok: false, error: String(err) })
-    } finally {
-      setSmtpTesting(false)
-    }
-  }
-
-  async function sendTestMail() {
-    const to = testMailTo.trim()
-    if (!to) return
-    setTestMailSending(true)
-    const now = new Date().toLocaleTimeString('ko-KR')
-    try {
-      const res = await fetch('/api/send-mail', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          to,
-          subject: '[멘토링 대시보드] SMTP 테스트 메일',
-          html: `<div style="font-family:sans-serif;padding:24px">
-            <h2 style="color:#7c3aed">멘토링 대시보드 — SMTP 테스트</h2>
-            <p>이 메일은 SMTP 연결 확인용 테스트 발송입니다.</p>
-            <p style="color:#6b7280;font-size:13px">발송 시각: ${new Date().toLocaleString('ko-KR')}</p>
-          </div>`,
-          text: `[멘토링 대시보드] SMTP 테스트 메일\n발송 시각: ${new Date().toLocaleString('ko-KR')}`,
-        }),
-      })
-      const data = await res.json()
-      if (data.ok) {
-        setTestMailLogs(prev => [...prev, { time: now, ok: true,  message: `→ ${to} 발송 완료` }])
-      } else {
-        setTestMailLogs(prev => [...prev, { time: now, ok: false, message: data.error ?? '발송 실패' }])
-      }
-    } catch (err) {
-      setTestMailLogs(prev => [...prev, { time: now, ok: false, message: String(err) }])
-    } finally {
-      setTestMailSending(false)
-    }
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -1001,76 +944,7 @@ export default function AdminDashboard() {
               </div>
             </div>
 
-            {/* ── SMTP 연결 확인 / 테스트 발송 ── */}
-            <div className="bg-gray-50 border border-gray-200 rounded-xl p-5 space-y-5">
-              <h3 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
-                🔧 SMTP 연결 확인 &amp; 테스트 발송
-              </h3>
 
-              {/* SMTP 연결 확인 */}
-              <div className="space-y-2">
-                <div className="flex items-center gap-3 flex-wrap">
-                  <button onClick={runSmtpTest} disabled={smtpTesting}
-                    className="text-sm px-4 py-2 rounded-lg border border-gray-300 bg-white hover:bg-gray-100 text-gray-700 disabled:opacity-50 whitespace-nowrap">
-                    {smtpTesting ? '확인 중...' : 'SMTP 연결 확인'}
-                  </button>
-                  {smtpStatus && (
-                    <span className={`text-sm font-medium ${smtpStatus.ok ? 'text-green-600' : 'text-red-500'}`}>
-                      {smtpStatus.ok ? `✅ ${smtpStatus.message ?? '연결 성공'}` : `❌ ${smtpStatus.error ?? '연결 실패'}`}
-                    </span>
-                  )}
-                </div>
-                {smtpStatus?.env && (
-                  <div className="bg-white border border-gray-200 rounded-lg px-4 py-3 text-xs text-gray-600 space-y-1">
-                    {Object.entries(smtpStatus.env).map(([k, v]) => (
-                      <div key={k} className="flex gap-3">
-                        <span className="font-mono text-gray-400 w-28 flex-shrink-0">{k}</span>
-                        <span>{String(v)}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* 테스트 발송 */}
-              <div className="space-y-2">
-                <label className="block text-xs font-medium text-gray-600">테스트 수신 이메일</label>
-                <div className="flex gap-2 flex-wrap">
-                  <input
-                    type="email" value={testMailTo}
-                    onChange={e => setTestMailTo(e.target.value)}
-                    placeholder="asj0129@hecto.co.kr"
-                    className="flex-1 min-w-48 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white"
-                  />
-                  <button onClick={sendTestMail}
-                    disabled={testMailSending || !testMailTo.trim()}
-                    className="text-sm px-4 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap">
-                    {testMailSending ? '발송 중...' : '테스트 발송'}
-                  </button>
-                </div>
-                <p className="text-xs text-gray-400">실제 안내 메일이 아닌 SMTP 테스트 메일이 발송됩니다.</p>
-              </div>
-
-              {/* 발송 로그 */}
-              {testMailLogs.length > 0 && (
-                <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
-                  <div className="px-3 py-2 bg-gray-50 border-b border-gray-100 flex items-center justify-between">
-                    <span className="text-xs font-medium text-gray-600">발송 로그 ({testMailLogs.length}건)</span>
-                    <button onClick={() => setTestMailLogs([])}
-                      className="text-xs text-gray-400 hover:text-gray-600">지우기</button>
-                  </div>
-                  <div className="max-h-40 overflow-y-auto divide-y divide-gray-100">
-                    {[...testMailLogs].reverse().map((log, i) => (
-                      <div key={i} className={`px-3 py-2 text-xs flex items-start gap-2 ${log.ok ? '' : 'bg-red-50'}`}>
-                        <span className="text-gray-400 flex-shrink-0 tabular-nums">{log.time}</span>
-                        <span>{log.ok ? '✅' : '❌'}</span>
-                        <span className={log.ok ? 'text-gray-700' : 'text-red-600 break-all'}>{log.message}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
           </>
         )}
 
