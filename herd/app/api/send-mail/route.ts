@@ -1,34 +1,40 @@
 import { NextRequest, NextResponse } from 'next/server'
-import nodemailer from 'nodemailer'
+import { sendMail } from '@/lib/mail'
+
+// nodemailer는 Node.js 전용(net/tls) — Edge runtime에서 실행 시 500 발생
+export const runtime = 'nodejs'
 
 export async function POST(req: NextRequest) {
   try {
     const { to, cc, subject, text, html } = await req.json()
+
     if (!to || !subject) {
       return NextResponse.json({ error: 'to, subject 필수' }, { status: 400 })
     }
 
-    const transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: Number(process.env.SMTP_PORT ?? 587),
-      secure: process.env.SMTP_SECURE === 'true',
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-      },
-    })
+    // to / cc: 쉼표 구분 string 또는 string[] 모두 허용
+    const toArr: string[] = Array.isArray(to)
+      ? to
+      : String(to).split(',').map((s: string) => s.trim()).filter(Boolean)
 
-    await transporter.sendMail({
-      from: process.env.SMTP_FROM ?? process.env.SMTP_USER,
-      to,
-      ...(cc ? { cc } : {}),
-      subject,
-      ...(html ? { html, text: text ?? '' } : { text: text ?? '' }),
-    })
+    const ccArr: string[] | undefined = cc
+      ? (Array.isArray(cc)
+          ? cc
+          : String(cc).split(',').map((s: string) => s.trim()).filter(Boolean))
+      : undefined
 
+    console.log('[api/send-mail] 수신 →', { to: toArr, cc: ccArr, subject })
+
+    const err = await sendMail({ to: toArr, cc: ccArr, subject, html: html ?? '', text })
+    if (err) {
+      console.error('[api/send-mail] 발송 오류 →', err)
+      return NextResponse.json({ error: err }, { status: 500 })
+    }
+
+    console.log('[api/send-mail] 발송 완료')
     return NextResponse.json({ ok: true })
   } catch (err) {
-    console.error('[send-mail]', err)
+    console.error('[send-mail] 예외 →', err)
     return NextResponse.json({ error: String(err) }, { status: 500 })
   }
 }
