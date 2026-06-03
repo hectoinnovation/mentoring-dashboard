@@ -650,10 +650,13 @@ export default function AdminDashboard() {
       const usedNames = new Map<string, number>()
 
       const namedItems = items.map(item => {
-        const baseName =
-          `${item.mentorName}_${item.menteeName}_${settlementYM}` +
-          `_${item.monthIndex}개월차_활동${item.activityNum}` +
-          `_${item.activityDate}_${item.costAmount}원_${item.receiptName}`
+        // 확장자 추출 (원본 파일명에서)
+        const dot = item.receiptName.lastIndexOf('.')
+        const ext = dot !== -1 ? item.receiptName.slice(dot) : ''  // e.g. '.jpg', '.pdf'
+        // 금액 천 단위 콤마 (예: 30,000원)
+        const amountStr = item.costAmount.toLocaleString('ko-KR')
+        // 파일명: 멘토이름_활동N_영수증_금액.확장자
+        const baseName = `${item.mentorName}_활동${item.activityNum}_영수증_${amountStr}원${ext}`
         return { ...item, fileName: getUniqueName(baseName, usedNames) }
       })
 
@@ -966,7 +969,7 @@ export default function AdminDashboard() {
                 </button>
                 <button onClick={downloadReceiptZip} disabled={zipLoading}
                   className="bg-gray-200 text-gray-700 px-4 py-1.5 rounded-lg text-sm font-medium hover:bg-gray-300 whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed">
-                  {zipLoading ? 'ZIP 생성 중...' : '영수증 ZIP'}
+                  {zipLoading ? 'ZIP 생성 중...' : '영수증 다운로드'}
                 </button>
               </div>
             </div>
