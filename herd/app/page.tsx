@@ -606,6 +606,10 @@ export default function AdminDashboard() {
       const md = row.record.months.find(m => m.monthIndex === row.monthIndex)
       if (!md) continue
 
+      // ── 정산 조건 필터: 지급인정 2회 이상 OR 지급예상 금액 1원 이상 ──
+      const validActs = countValidActivities(md)
+      if (validActs < 2 && row.amount < 1) continue  // 미충족 → 제외
+
       // 활동 날짜 오름차순 (같은 날짜면 배열 원래 순서=created_at 순 유지)
       const sorted = [...md.activities].sort((a, b) =>
         a.activityDate.localeCompare(b.activityDate)
