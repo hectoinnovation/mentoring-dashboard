@@ -191,6 +191,7 @@ export async function GET(req: NextRequest) {
       date:  today,
       total: results.length,
       results,
+      ...(debug ? { diagnostics } : {}),
     })
 
   } catch (err) {
