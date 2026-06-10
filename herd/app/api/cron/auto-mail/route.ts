@@ -61,7 +61,9 @@ export async function GET(req: NextRequest) {
 
   const today   = todayKST()
   const nowIso  = new Date().toISOString()
+  const debug   = req.nextUrl.searchParams.get('debug') === '1'
   const results: { category: string; target: string; type: string; status: string }[] = []
+  const diagnostics: Record<string, unknown> = {}
 
   try {
     // ── 1. 예약 메일 발송 ────────────────────────────────────────────────────
@@ -70,6 +72,15 @@ export async function GET(req: NextRequest) {
       .select('*')
       .eq('status', 'pending')
       .lte('scheduled_at', nowIso)
+
+    if (debug) {
+      diagnostics.supabaseUrl    = process.env.NEXT_PUBLIC_SUPABASE_URL?.slice(0, 40) + '...'
+      diagnostics.hasAnonKey     = !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+      diagnostics.hasServiceKey  = !!process.env.SUPABASE_SERVICE_ROLE_KEY
+      diagnostics.nowIso         = nowIso
+      diagnostics.scheduledCount = scheduled?.length ?? 0
+      diagnostics.scheduledError = schErr ? schErr.message : null
+    }
 
     if (schErr) console.error('[cron] scheduled_mails fetch error:', schErr)
 
