@@ -9,7 +9,8 @@ import {
   countValidActivities, countAllActivities,
   getMonthlyPayment, getMonthActualCost, getMonthPaymentLimit,
   fmtAmount,
-  generateInitialGuideMailHtml, generateEndMailHtml,
+  generateInitialGuideMailHtml, generateInitialGuideMailBody,
+  generateEndMailHtml, generateEndMailBody,
   sendInitialGuideMail, sendEndMail, sendBulkEndMail,
   getMentoringProgress,
 } from '@/lib/mentoring'
@@ -22,6 +23,18 @@ import {
 // ─────────────────────────────────────────────────────────────────────────────
 
 type Tab = 'manage' | 'mail' | 'settlement'
+
+interface ScheduledMailRow {
+  id:           string
+  mentor_id:    string | null
+  to_email:     string
+  cc_email:     string | null
+  subject:      string
+  scheduled_at: string
+  status:       'pending' | 'sent' | 'cancelled'
+  sent_at:      string | null
+  created_at:   string
+}
 
 const STATUS_LABEL: Record<MentoringStatus, string> = {
   active: '진행중', completed: '완료', suspended: '중단', deleted: '삭제',
@@ -222,6 +235,12 @@ export default function AdminDashboard() {
       .finally(() => setDbLoading(false))
   }, [authed])
 
+  // 예약 메일 로드 (mail 탭 진입 시)
+  useEffect(() => {
+    if (authed !== true || tab !== 'mail') return
+    fetchScheduledMails()
+  }, [authed, tab])
+
   // ── add/edit modal
   const [showAddEdit, setShowAddEdit] = useState(false)
   const [editingId, setEditingId]     = useState<string | null>(null)
@@ -247,6 +266,16 @@ export default function AdminDashboard() {
   const [mailCc, setMailCc] = useState('inno_hm@hecto.co.kr')
   const [bulkConfirmType, setBulkConfirmType] = useState<'initial' | 'end' | null>(null)
   const [bulkConfirmTargets, setBulkConfirmTargets] = useState<MentoringRecord[]>([])
+
+  // ── 예약 발송
+  const [sendMode, setSendMode]         = useState<'immediate' | 'scheduled'>('immediate')
+  const [scheduleDate, setScheduleDate] = useState('')
+  const [scheduleTime, setScheduleTime] = useState('09:00')
+  const [scheduledMails, setScheduledMails]       = useState<ScheduledMailRow[]>([])
+  const [scheduledMailsLoading, setScheduledMailsLoading] = useState(false)
+  const [editScheduleId, setEditScheduleId]       = useState<string | null>(null)
+  const [editScheduleDate, setEditScheduleDate]   = useState('')
+  const [editScheduleTime, setEditScheduleTime]   = useState('09:00')
 
   // ── settlement
   const [settlementYM, setSettlementYM] = useState(TODAY.slice(0, 7))
@@ -475,8 +504,71 @@ export default function AdminDashboard() {
   }, [mailPreviewRecord, mailPreviewType])
 
 
+  async function fetchScheduledMails() {
+    setScheduledMailsLoading(true)
+    try {
+      const res  = await fetch('/api/scheduled-mails')
+      const data = await res.json()
+      setScheduledMails(data.mails ?? [])
+    } catch (e) {
+      console.error('[fetchScheduledMails]', e)
+    } finally {
+      setScheduledMailsLoading(false)
+    }
+  }
+
   async function handleSendMail() {
     if (!mailPreviewRecord) return
+
+    // ── 예약 발송 ─────────────────────────────────────────────────────────────
+    if (sendMode === 'scheduled') {
+      if (!scheduleDate || !scheduleTime) {
+        alert('예약 날짜와 시간을 입력해주세요.')
+        return
+      }
+      // KST → ISO8601
+      const scheduledAt = `${scheduleDate}T${scheduleTime}:00+09:00`
+      const link = `${window.location.origin}/mentor/${mailPreviewRecord.token}`
+      const html = mailPreviewType === 'initial'
+        ? generateInitialGuideMailHtml(mailPreviewRecord, link)
+        : generateEndMailHtml()
+      const bodyText = mailPreviewType === 'initial'
+        ? generateInitialGuideMailBody(mailPreviewRecord, link)
+        : generateEndMailBody()
+      const subject = mailPreviewType === 'initial'
+        ? '멘토 선정 및 멘토링 프로그램 안내'
+        : '멘토링 활동 등록 및 증빙 자료 제출 안내'
+      try {
+        const res = await fetch('/api/scheduled-mails', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({
+            mentor_id:    mailPreviewRecord.id,
+            to_email:     mailPreviewRecord.mentorEmail,
+            cc_email:     mailCc.trim() || null,
+            subject,
+            html,
+            body_text:    bodyText,
+            scheduled_at: scheduledAt,
+          }),
+        })
+        if (res.ok) {
+          alert(`예약 완료!\n발송 예정: ${scheduleDate} ${scheduleTime}`)
+          fetchScheduledMails()
+        } else {
+          const d = await res.json()
+          alert(`예약 저장 실패: ${d.error}`)
+        }
+      } catch { alert('예약 저장 중 오류가 발생했습니다.') }
+      setMailPreviewRecord(null)
+      setSendMode('immediate')
+      setScheduleDate('')
+      setScheduleTime('09:00')
+      setMailCc('inno_hm@hecto.co.kr')
+      return
+    }
+
+    // ── 즉시 발송 ─────────────────────────────────────────────────────────────
     setMailSending(true)
     try {
       const cc = mailCc.trim() || undefined
@@ -493,7 +585,46 @@ export default function AdminDashboard() {
       }
       alert('메일이 발송되었습니다.')
     } catch { alert('메일 발송에 실패했습니다.') }
-    finally { setMailSending(false); setMailPreviewRecord(null); setMailCc('inno_hm@hecto.co.kr') }
+    finally {
+      setMailSending(false)
+      setMailPreviewRecord(null)
+      setSendMode('immediate')
+      setScheduleDate('')
+      setScheduleTime('09:00')
+      setMailCc('inno_hm@hecto.co.kr')
+    }
+  }
+
+  async function cancelScheduledMail(id: string) {
+    if (!confirm('예약을 취소하시겠습니까?')) return
+    const res = await fetch('/api/scheduled-mails', {
+      method:  'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ id }),
+    })
+    if (res.ok) {
+      setScheduledMails(prev => prev.map(m => m.id === id ? { ...m, status: 'cancelled' } : m))
+    } else {
+      alert('취소 실패')
+    }
+  }
+
+  async function saveEditSchedule() {
+    if (!editScheduleId || !editScheduleDate || !editScheduleTime) return
+    const scheduledAt = `${editScheduleDate}T${editScheduleTime}:00+09:00`
+    const res = await fetch('/api/scheduled-mails', {
+      method:  'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ id: editScheduleId, scheduled_at: scheduledAt }),
+    })
+    if (res.ok) {
+      setScheduledMails(prev => prev.map(m =>
+        m.id === editScheduleId ? { ...m, scheduled_at: scheduledAt } : m
+      ))
+      setEditScheduleId(null)
+    } else {
+      alert('수정 실패')
+    }
   }
 
   function toggleMailSelect(id: string) {
@@ -891,6 +1022,107 @@ export default function AdminDashboard() {
               체크박스로 선택 후 일괄 발송하거나, 개별 발송 버튼을 클릭하세요.
             </div>
 
+            {/* 예약 메일 목록 */}
+            <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+              <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+                <h3 className="font-semibold text-gray-700 text-sm">예약 메일 목록</h3>
+                <button
+                  onClick={fetchScheduledMails}
+                  disabled={scheduledMailsLoading}
+                  className="text-xs px-3 py-1 rounded bg-gray-100 hover:bg-gray-200 text-gray-600 disabled:opacity-50"
+                >
+                  {scheduledMailsLoading ? '로딩 중...' : '새로고침'}
+                </button>
+              </div>
+              {scheduledMails.filter(m => m.status !== 'cancelled').length === 0 ? (
+                <div className="px-4 py-6 text-center text-gray-400 text-sm">예약된 메일이 없습니다.</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 text-gray-600">
+                      <tr>
+                        {['수신자', '제목', '예약일시', '상태', '관리'].map(h => (
+                          <th key={h} className="px-4 py-2.5 text-left font-medium whitespace-nowrap">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {scheduledMails.filter(m => m.status !== 'cancelled').map(mail => (
+                        <tr key={mail.id} className="hover:bg-gray-50">
+                          <td className="px-4 py-3 text-gray-700 text-xs">{mail.to_email}</td>
+                          <td className="px-4 py-3 text-gray-700 max-w-[200px] truncate text-xs">{mail.subject}</td>
+                          <td className="px-4 py-3 text-gray-600 text-xs whitespace-nowrap">
+                            {editScheduleId === mail.id ? (
+                              <div className="flex gap-1">
+                                <input type="date" value={editScheduleDate}
+                                  onChange={e => setEditScheduleDate(e.target.value)}
+                                  className="border rounded px-2 py-1 text-xs w-32 focus:outline-none focus:ring-1 focus:ring-blue-300" />
+                                <input type="time" value={editScheduleTime}
+                                  onChange={e => setEditScheduleTime(e.target.value)}
+                                  className="border rounded px-2 py-1 text-xs w-24 focus:outline-none focus:ring-1 focus:ring-blue-300" />
+                              </div>
+                            ) : (
+                              new Date(mail.scheduled_at).toLocaleString('ko-KR', {
+                                year: 'numeric', month: '2-digit', day: '2-digit',
+                                hour: '2-digit', minute: '2-digit', hour12: false,
+                                timeZone: 'Asia/Seoul',
+                              })
+                            )}
+                          </td>
+                          <td className="px-4 py-3">
+                            {mail.status === 'pending' && (
+                              <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-700">예약됨</span>
+                            )}
+                            {mail.status === 'sent' && (
+                              <span className="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-700">
+                                발송완료 {mail.sent_at ? new Date(mail.sent_at).toLocaleDateString('ko-KR') : ''}
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3">
+                            {mail.status === 'pending' && (
+                              <div className="flex gap-1.5">
+                                {editScheduleId === mail.id ? (
+                                  <>
+                                    <button onClick={saveEditSchedule}
+                                      className="text-xs px-2 py-1 rounded bg-blue-600 text-white hover:bg-blue-700">
+                                      저장
+                                    </button>
+                                    <button onClick={() => setEditScheduleId(null)}
+                                      className="text-xs px-2 py-1 rounded bg-gray-100 text-gray-600 hover:bg-gray-200">
+                                      취소
+                                    </button>
+                                  </>
+                                ) : (
+                                  <>
+                                    <button onClick={() => {
+                                      setEditScheduleId(mail.id)
+                                      const d = new Date(mail.scheduled_at)
+                                      const kstD = new Date(d.getTime() + 9 * 60 * 60 * 1000)
+                                      setEditScheduleDate(kstD.toISOString().slice(0, 10))
+                                      setEditScheduleTime(kstD.toISOString().slice(11, 16))
+                                    }}
+                                      className="text-xs px-2 py-1 rounded bg-gray-100 text-gray-600 hover:bg-gray-200">
+                                      수정
+                                    </button>
+                                    <button onClick={() => cancelScheduledMail(mail.id)}
+                                      className="text-xs px-2 py-1 rounded bg-red-50 text-red-600 hover:bg-red-100">
+                                      취소
+                                    </button>
+                                  </>
+                                )}
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {/* 기존 메일 발송 테이블 */}
             <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
@@ -1393,11 +1625,72 @@ export default function AdminDashboard() {
                 </div>
               </div>
             </div>
+            {/* 발송 모드 선택 */}
+            <div className="px-6 pt-3 pb-1">
+              <div className="flex gap-2 mb-3">
+                <button
+                  onClick={() => setSendMode('immediate')}
+                  className={`px-3 py-1.5 text-sm rounded-lg font-medium border transition-colors ${
+                    sendMode === 'immediate'
+                      ? 'bg-blue-600 text-white border-blue-600'
+                      : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+                  }`}
+                >
+                  즉시 발송
+                </button>
+                <button
+                  onClick={() => setSendMode('scheduled')}
+                  className={`px-3 py-1.5 text-sm rounded-lg font-medium border transition-colors ${
+                    sendMode === 'scheduled'
+                      ? 'bg-indigo-600 text-white border-indigo-600'
+                      : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+                  }`}
+                >
+                  예약 발송
+                </button>
+              </div>
+              {sendMode === 'scheduled' && (
+                <div className="bg-indigo-50 border border-indigo-200 rounded-lg px-4 py-3">
+                  <p className="text-xs font-medium text-indigo-700 mb-2">발송 예약 일시 (KST)</p>
+                  <div className="flex gap-2">
+                    <input
+                      type="date"
+                      value={scheduleDate}
+                      onChange={e => setScheduleDate(e.target.value)}
+                      min={new Date().toISOString().slice(0, 10)}
+                      className="flex-1 border border-indigo-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                    />
+                    <input
+                      type="time"
+                      value={scheduleTime}
+                      onChange={e => setScheduleTime(e.target.value)}
+                      className="w-28 border border-indigo-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                    />
+                  </div>
+                  {scheduleDate && scheduleTime && (
+                    <p className="text-xs text-indigo-600 mt-1">
+                      예약: {scheduleDate} {scheduleTime} 발송
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
             <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-2">
-              <button onClick={() => { setMailPreviewRecord(null); setMailCc('inno_hm@hecto.co.kr') }} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">닫기</button>
-              <button onClick={handleSendMail} disabled={mailSending}
-                className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
-                {mailSending ? '발송 중...' : '발송'}
+              <button onClick={() => {
+                setMailPreviewRecord(null)
+                setSendMode('immediate')
+                setScheduleDate('')
+                setScheduleTime('09:00')
+                setMailCc('inno_hm@hecto.co.kr')
+              }} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">닫기</button>
+              <button
+                onClick={handleSendMail}
+                disabled={mailSending || (sendMode === 'scheduled' && (!scheduleDate || !scheduleTime))}
+                className={`px-4 py-2 text-sm text-white rounded-lg disabled:opacity-50 ${
+                  sendMode === 'scheduled' ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-blue-600 hover:bg-blue-700'
+                }`}
+              >
+                {mailSending ? '발송 중...' : sendMode === 'scheduled' ? '예약하기' : '발송'}
               </button>
             </div>
           </div>
