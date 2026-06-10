@@ -17,7 +17,8 @@ import {
 } from '@/lib/auto-mail'
 
 export const runtime    = 'nodejs'
-export const maxDuration = 60   // Vercel Pro: 최대 60초
+export const dynamic    = 'force-dynamic'  // 빌드 시 정적 실행 방지
+export const maxDuration = 60
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 헬퍼
@@ -107,7 +108,17 @@ export async function GET(req: NextRequest) {
       .select('id, mentor_name, mentor_email, mentee_name, join_date, status')
       .eq('status', 'active')
 
-    if (mErr) throw mErr
+    if (mErr) {
+      console.error('[cron/auto-mail] mentoring_pairs 조회 오류:', mErr)
+      // 예약 발송은 처리했으므로 자동 발송만 스킵하고 정상 응답 반환
+      return NextResponse.json({
+        ok:    true,
+        date:  today,
+        total: results.length,
+        results,
+        warn:  `mentoring_pairs 조회 실패: ${mErr.message}`,
+      })
+    }
 
     if (mentors && mentors.length > 0) {
       // 이미 발송된 자동 메일 로그 조회
