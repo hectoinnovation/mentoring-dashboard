@@ -2,11 +2,11 @@
  * /api/cron/auto-mail
  *
  * Vercel Cron Job (매일 01:00 UTC = KST 10:00):
- *  1. 자동 발송 — joinDate 기준 D-7, D-1, D-Day, 입사 후 7일, 30일
+ *  1. 자동 발송 — join_date 기준 D-7, D-1, D-Day, 입사 후 7일, 30일
  *  2. 예약 발송 — scheduled_mails 테이블에서 scheduled_at <= now() 인 건 발송
  *
  * 인증: Vercel이 Authorization: Bearer <CRON_SECRET> 헤더를 자동으로 추가함.
- * 수동 테스트: GET /api/cron/auto-mail?secret=<CRON_SECRET>
+ * 수동 테스트: GET /api/cron/auto-mail?secret=<CRON_SECRET>&debug=1
  */
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
@@ -17,12 +17,8 @@ import {
 } from '@/lib/auto-mail'
 
 export const runtime    = 'nodejs'
-export const dynamic    = 'force-dynamic'  // 빌드 시 정적 실행 방지
+export const dynamic    = 'force-dynamic'
 export const maxDuration = 60
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 헬퍼
-// ─────────────────────────────────────────────────────────────────────────────
 
 /** YYYY-MM-DD 기준 ±daysOffset 날짜 반환 */
 function addDays(base: string, offset: number): string {
@@ -38,32 +34,60 @@ function todayKST(): string {
   return kst.toISOString().slice(0, 10)
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// GET handler
-// ─────────────────────────────────────────────────────────────────────────────
-
 export async function GET(req: NextRequest) {
-  // 인증 확인 (CRON_SECRET 없으면 개발 환경으로 간주해 통과)
-  const secret = process.env.CRON_SECRET
-  if (secret) {
-    const auth      = req.headers.get('authorization')
-    const querySecret = req.nextUrl.searchParams.get('secret')
-    if (auth !== `Bearer ${secret}` && querySecret !== secret) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
+  const debug = req.nextUrl.searchParams.get('debug') === '1'
+
+  // ── 환경변수 진단 정보 (debug=1 시 응답에 포함) ──────────────────────────
+  const diagnostics: Record<string, unknown> = {}
+  if (debug) {
+    diagnostics.supabaseUrl   = (process.env.NEXT_PUBLIC_SUPABASE_URL ?? '').slice(0, 50) + '...'
+    diagnostics.hasAnonKey    = !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+    diagnostics.hasServiceKey = !!process.env.SUPABASE_SERVICE_ROLE_KEY
+    diagnostics.hasCronSecret = !!process.env.CRON_SECRET
+    diagnostics.smtpHost      = process.env.SMTP_HOST ?? null
+    diagnostics.smtpPort      = process.env.SMTP_PORT ?? null
+    diagnostics.smtpUser      = process.env.SMTP_USER ?? null
+    diagnostics.hasSmtpPass   = !!process.env.SMTP_PASS
+    diagnostics.smtpPassLen   = (process.env.SMTP_PASS ?? '').length
+    diagnostics.mailFrom      = process.env.MAIL_FROM ?? null
   }
 
-  // Service Role Key 우선 사용 (RLS 우회). 없으면 Anon Key fallback.
+  // ── 인증 확인 ────────────────────────────────────────────────────────────
+  const secret = process.env.CRON_SECRET
+  if (secret) {
+    const auth        = req.headers.get('authorization')
+    const querySecret = req.nextUrl.searchParams.get('secret')
+    const passed      = auth === `Bearer ${secret}` || querySecret === secret
+    if (debug) diagnostics.authPassed = passed
+    if (!passed) {
+      return NextResponse.json(
+        { error: 'Unauthorized', ...(debug ? { diagnostics } : {}) },
+        { status: 401 },
+      )
+    }
+  } else {
+    if (debug) diagnostics.authPassed = 'no-secret-bypass'
+  }
+
+  // ── Supabase 클라이언트 ───────────────────────────────────────────────────
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
   )
 
-  const today   = todayKST()
-  const nowIso  = new Date().toISOString()
-  const debug   = req.nextUrl.searchParams.get('debug') === '1'
-  const results: { category: string; target: string; type: string; status: string }[] = []
-  const diagnostics: Record<string, unknown> = {}
+  const today  = todayKST()
+  const nowIso = new Date().toISOString()
+  if (debug) {
+    diagnostics.today  = today
+    diagnostics.nowIso = nowIso
+  }
+
+  const results: {
+    category: string
+    target:   string
+    type:     string
+    status:   string
+  }[] = []
 
   try {
     // ── 1. 예약 메일 발송 ────────────────────────────────────────────────────
@@ -74,39 +98,39 @@ export async function GET(req: NextRequest) {
       .lte('scheduled_at', nowIso)
 
     if (debug) {
-      diagnostics.supabaseUrl    = process.env.NEXT_PUBLIC_SUPABASE_URL?.slice(0, 40) + '...'
-      diagnostics.hasAnonKey     = !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-      diagnostics.hasServiceKey  = !!process.env.SUPABASE_SERVICE_ROLE_KEY
-      diagnostics.nowIso         = nowIso
       diagnostics.scheduledCount = scheduled?.length ?? 0
-      diagnostics.scheduledError = schErr ? schErr.message : null
+      diagnostics.scheduledError = schErr ? `${schErr.code}: ${schErr.message}` : null
+      diagnostics.scheduledRows  = (scheduled ?? []).map(r => ({
+        id: r.id, to: r.to_email, scheduled_at: r.scheduled_at,
+      }))
     }
 
-    if (schErr) console.error('[cron] scheduled_mails fetch error:', schErr)
+    if (schErr) console.error('[cron] scheduled_mails 조회 오류:', schErr)
 
     for (const mail of (scheduled ?? [])) {
       try {
-        const toArr  = String(mail.to_email).split(',').map((s: string) => s.trim()).filter(Boolean)
-        const ccArr  = mail.cc_email
+        const toArr = String(mail.to_email).split(',').map((s: string) => s.trim()).filter(Boolean)
+        const ccArr = mail.cc_email
           ? String(mail.cc_email).split(',').map((s: string) => s.trim()).filter(Boolean)
           : undefined
 
-        const err = await sendMail({
-          to: toArr,
-          cc: ccArr,
+        const sendErr = await sendMail({
+          to:      toArr,
+          cc:      ccArr,
           subject: mail.subject,
           html:    mail.html,
           text:    mail.body_text ?? undefined,
         })
 
-        if (!err) {
+        if (!sendErr) {
           await supabase
             .from('scheduled_mails')
             .update({ status: 'sent', sent_at: nowIso, updated_at: nowIso })
             .eq('id', mail.id)
           results.push({ category: '예약', target: mail.to_email, type: mail.subject, status: 'sent' })
         } else {
-          results.push({ category: '예약', target: mail.to_email, type: mail.subject, status: `error: ${err}` })
+          // 발송 실패 시 status는 pending 유지 (다음 cron에서 재시도)
+          results.push({ category: '예약', target: mail.to_email, type: mail.subject, status: `error: ${sendErr}` })
         }
       } catch (e) {
         results.push({ category: '예약', target: mail.to_email, type: mail.subject, status: `exception: ${String(e)}` })
@@ -119,20 +143,24 @@ export async function GET(req: NextRequest) {
       .select('id, mentor_name, mentor_email, mentee_name, join_date, status')
       .eq('status', 'active')
 
+    if (debug) {
+      diagnostics.mentorCount = mentors?.length ?? 0
+      diagnostics.mentorError = mErr ? `${mErr.code}: ${mErr.message}` : null
+    }
+
     if (mErr) {
       console.error('[cron/auto-mail] mentoring_pairs 조회 오류:', mErr)
-      // 예약 발송은 처리했으므로 자동 발송만 스킵하고 정상 응답 반환
       return NextResponse.json({
         ok:    true,
         date:  today,
         total: results.length,
         results,
-        warn:  `mentoring_pairs 조회 실패: ${mErr.message}`,
+        warn:  `mentoring_pairs 조회 실패: ${mErr.code} ${mErr.message}`,
+        ...(debug ? { diagnostics } : {}),
       })
     }
 
     if (mentors && mentors.length > 0) {
-      // 이미 발송된 자동 메일 로그 조회
       const mentorIds = mentors.map((m: { id: string }) => m.id)
       const { data: logs } = await supabase
         .from('auto_mail_log')
@@ -150,32 +178,38 @@ export async function GET(req: NextRequest) {
 
         for (const type of TYPES) {
           const targetDate = addDays(mentor.join_date, AUTO_MAIL_DAYS[type])
+          if (debug) {
+            if (!diagnostics.autoMailChecks) diagnostics.autoMailChecks = []
+            ;(diagnostics.autoMailChecks as unknown[]).push({
+              mentor: mentor.mentor_name, type, targetDate, today, match: targetDate === today,
+            })
+          }
           if (targetDate !== today) continue
 
           const key = `${mentor.id}:${type}`
-          if (sent.has(key)) continue  // 중복 방지
+          if (sent.has(key)) continue
 
           try {
             const subject = getAutoMailSubject(type, mentor.mentor_name, mentor.join_date)
             const html    = generateAutoMailHtml(type, mentor.mentor_name, mentor.mentee_name ?? '', mentor.join_date)
 
-            const err = await sendMail({
+            const sendErr = await sendMail({
               to: [mentor.mentor_email],
               subject,
               html,
             })
 
-            if (!err) {
+            if (!sendErr) {
               await supabase.from('auto_mail_log').insert({
-                mentor_id:  mentor.id,
-                mail_type:  type,
-                recipient:  mentor.mentor_email,
+                mentor_id: mentor.id,
+                mail_type: type,
+                recipient: mentor.mentor_email,
                 subject,
               })
               sent.add(key)
               results.push({ category: '자동', target: mentor.mentor_name, type, status: 'sent' })
             } else {
-              results.push({ category: '자동', target: mentor.mentor_name, type, status: `error: ${err}` })
+              results.push({ category: '자동', target: mentor.mentor_name, type, status: `error: ${sendErr}` })
             }
           } catch (e) {
             results.push({ category: '자동', target: mentor.mentor_name, type, status: `exception: ${String(e)}` })
@@ -196,6 +230,9 @@ export async function GET(req: NextRequest) {
 
   } catch (err) {
     console.error('[cron/auto-mail] 오류:', err)
-    return NextResponse.json({ error: String(err) }, { status: 500 })
+    return NextResponse.json(
+      { error: String(err), ...(debug ? { diagnostics } : {}) },
+      { status: 500 },
+    )
   }
 }
