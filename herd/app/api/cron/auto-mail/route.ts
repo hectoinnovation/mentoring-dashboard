@@ -1,46 +1,31 @@
 /**
  * /api/cron/auto-mail
  *
- * Vercel Cron Job (매일 01:00 UTC = KST 10:00):
- *  1. 자동 발송 — join_date 기준 D-7, D-1, D-Day, 입사 후 7일, 30일
- *  2. 예약 발송 — scheduled_mails 테이블에서 scheduled_at <= now() 인 건 발송
+ * 입퇴사자 대시보드 — 예약 메일 자동 발송 cron
  *
- * 인증: Vercel이 Authorization: Bearer <CRON_SECRET> 헤더를 자동으로 추가함.
- * 수동 테스트: GET /api/cron/auto-mail?secret=<CRON_SECRET>&debug=1
+ * 실행: GitHub Actions (매일 KST 10:00 = UTC 01:00)
+ * 동작: scheduled_mails 테이블에서 status='pending', scheduled_at <= now() 인 건 발송
+ *       발송 성공 → status='sent', sent_at=now()
+ *       발송 실패 → status 유지(pending), 다음 실행에서 재시도
+ *
+ * 인증: Authorization: Bearer <CRON_SECRET>  또는  ?secret=<CRON_SECRET>
+ * 디버그: ?debug=1 추가 시 환경변수·조회 결과 상세 응답
  */
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { sendMail } from '@/lib/mail'
-import {
-  generateAutoMailHtml, getAutoMailSubject,
-  AUTO_MAIL_DAYS, type AutoMailType,
-} from '@/lib/auto-mail'
 
 export const runtime    = 'nodejs'
 export const dynamic    = 'force-dynamic'
 export const maxDuration = 60
 
-/** YYYY-MM-DD 기준 ±daysOffset 날짜 반환 */
-function addDays(base: string, offset: number): string {
-  const d = new Date(base)
-  d.setUTCDate(d.getUTCDate() + offset)
-  return d.toISOString().slice(0, 10)
-}
-
-/** KST 기준 오늘 날짜 (UTC+9) */
-function todayKST(): string {
-  const now = new Date()
-  const kst = new Date(now.getTime() + 9 * 60 * 60 * 1000)
-  return kst.toISOString().slice(0, 10)
-}
-
 export async function GET(req: NextRequest) {
   const debug = req.nextUrl.searchParams.get('debug') === '1'
 
-  // ── 환경변수 진단 정보 (debug=1 시 응답에 포함) ──────────────────────────
+  // ── 환경변수 진단 (debug=1) ───────────────────────────────────────────────
   const diagnostics: Record<string, unknown> = {}
   if (debug) {
-    diagnostics.supabaseUrl   = (process.env.NEXT_PUBLIC_SUPABASE_URL ?? '').slice(0, 50) + '...'
+    diagnostics.supabaseUrl   = (process.env.NEXT_PUBLIC_SUPABASE_URL ?? '').slice(0, 50)
     diagnostics.hasAnonKey    = !!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
     diagnostics.hasServiceKey = !!process.env.SUPABASE_SERVICE_ROLE_KEY
     diagnostics.hasCronSecret = !!process.env.CRON_SECRET
@@ -50,14 +35,15 @@ export async function GET(req: NextRequest) {
     diagnostics.hasSmtpPass   = !!process.env.SMTP_PASS
     diagnostics.smtpPassLen   = (process.env.SMTP_PASS ?? '').length
     diagnostics.mailFrom      = process.env.MAIL_FROM ?? null
+    diagnostics.nowUtc        = new Date().toISOString()
   }
 
-  // ── 인증 확인 ────────────────────────────────────────────────────────────
-  const secret = process.env.CRON_SECRET
-  if (secret) {
-    const auth        = req.headers.get('authorization')
+  // ── 인증 ────────────────────────────────────────────────────────────────────
+  const cronSecret = process.env.CRON_SECRET
+  if (cronSecret) {
+    const bearer      = req.headers.get('authorization')
     const querySecret = req.nextUrl.searchParams.get('secret')
-    const passed      = auth === `Bearer ${secret}` || querySecret === secret
+    const passed      = bearer === `Bearer ${cronSecret}` || querySecret === cronSecret
     if (debug) diagnostics.authPassed = passed
     if (!passed) {
       return NextResponse.json(
@@ -75,45 +61,55 @@ export async function GET(req: NextRequest) {
     process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
   )
 
-  const today  = todayKST()
   const nowIso = new Date().toISOString()
-  if (debug) {
-    diagnostics.today  = today
-    diagnostics.nowIso = nowIso
-  }
 
   const results: {
-    category: string
-    target:   string
-    type:     string
-    status:   string
+    id:     string
+    to:     string
+    subject: string
+    status: string
   }[] = []
 
   try {
-    // ── 1. 예약 메일 발송 ────────────────────────────────────────────────────
-    const { data: scheduled, error: schErr } = await supabase
+    // ── 발송 대상 조회: status=pending AND scheduled_at <= now ───────────────
+    const { data: pending, error: fetchErr } = await supabase
       .from('scheduled_mails')
-      .select('*')
+      .select('id, to_email, cc_email, subject, html, body_text, scheduled_at')
       .eq('status', 'pending')
       .lte('scheduled_at', nowIso)
 
     if (debug) {
-      diagnostics.scheduledCount = scheduled?.length ?? 0
-      diagnostics.scheduledError = schErr ? `${schErr.code}: ${schErr.message}` : null
-      diagnostics.scheduledRows  = (scheduled ?? []).map(r => ({
+      diagnostics.pendingCount = pending?.length ?? 0
+      diagnostics.fetchError   = fetchErr ? `${fetchErr.code}: ${fetchErr.message}` : null
+      diagnostics.pendingRows  = (pending ?? []).map(r => ({
         id: r.id, to: r.to_email, scheduled_at: r.scheduled_at,
       }))
     }
 
-    if (schErr) console.error('[cron] scheduled_mails 조회 오류:', schErr)
+    if (fetchErr) {
+      console.error('[cron/auto-mail] scheduled_mails 조회 실패:', fetchErr)
+      return NextResponse.json(
+        {
+          ok:    false,
+          error: `DB 조회 실패: ${fetchErr.code} ${fetchErr.message}`,
+          ...(debug ? { diagnostics } : {}),
+        },
+        { status: 500 },
+      )
+    }
 
-    for (const mail of (scheduled ?? [])) {
+    // ── 각 메일 발송 ─────────────────────────────────────────────────────────
+    for (const mail of (pending ?? [])) {
+      const toArr = String(mail.to_email)
+        .split(',')
+        .map((s: string) => s.trim())
+        .filter(Boolean)
+
+      const ccArr = mail.cc_email
+        ? String(mail.cc_email).split(',').map((s: string) => s.trim()).filter(Boolean)
+        : undefined
+
       try {
-        const toArr = String(mail.to_email).split(',').map((s: string) => s.trim()).filter(Boolean)
-        const ccArr = mail.cc_email
-          ? String(mail.cc_email).split(',').map((s: string) => s.trim()).filter(Boolean)
-          : undefined
-
         const sendErr = await sendMail({
           to:      toArr,
           cc:      ccArr,
@@ -123,115 +119,46 @@ export async function GET(req: NextRequest) {
         })
 
         if (!sendErr) {
-          await supabase
+          // 발송 성공 → sent 처리
+          const { error: updateErr } = await supabase
             .from('scheduled_mails')
             .update({ status: 'sent', sent_at: nowIso, updated_at: nowIso })
             .eq('id', mail.id)
-          results.push({ category: '예약', target: mail.to_email, type: mail.subject, status: 'sent' })
+
+          if (updateErr) {
+            console.error('[cron/auto-mail] status 업데이트 실패:', updateErr)
+          }
+
+          results.push({ id: mail.id, to: mail.to_email, subject: mail.subject, status: 'sent' })
         } else {
-          // 발송 실패 시 status는 pending 유지 (다음 cron에서 재시도)
-          results.push({ category: '예약', target: mail.to_email, type: mail.subject, status: `error: ${sendErr}` })
+          // 발송 실패 → pending 유지, 에러만 기록
+          console.error(`[cron/auto-mail] 발송 실패 id=${mail.id}:`, sendErr)
+          results.push({ id: mail.id, to: mail.to_email, subject: mail.subject, status: `error: ${sendErr}` })
         }
       } catch (e) {
-        results.push({ category: '예약', target: mail.to_email, type: mail.subject, status: `exception: ${String(e)}` })
+        console.error(`[cron/auto-mail] 예외 id=${mail.id}:`, e)
+        results.push({ id: mail.id, to: mail.to_email, subject: mail.subject, status: `exception: ${String(e)}` })
       }
     }
 
-    // ── 2. 자동 메일 발송 (D-7, D-1, D-Day, +7, +30) ──────────────────────
-    const { data: mentors, error: mErr } = await supabase
-      .from('mentoring_pairs')
-      .select('id, mentor_name, mentor_email, mentee_name, join_date, status')
-      .eq('status', 'active')
-
-    if (debug) {
-      diagnostics.mentorCount = mentors?.length ?? 0
-      diagnostics.mentorError = mErr ? `${mErr.code}: ${mErr.message}` : null
-    }
-
-    if (mErr) {
-      console.error('[cron/auto-mail] mentoring_pairs 조회 오류:', mErr)
-      return NextResponse.json({
-        ok:    true,
-        date:  today,
-        total: results.length,
-        results,
-        warn:  `mentoring_pairs 조회 실패: ${mErr.code} ${mErr.message}`,
-        ...(debug ? { diagnostics } : {}),
-      })
-    }
-
-    if (mentors && mentors.length > 0) {
-      const mentorIds = mentors.map((m: { id: string }) => m.id)
-      const { data: logs } = await supabase
-        .from('auto_mail_log')
-        .select('mentor_id, mail_type')
-        .in('mentor_id', mentorIds)
-
-      const sent = new Set(
-        ((logs ?? []) as { mentor_id: string; mail_type: string }[]).map(l => `${l.mentor_id}:${l.mail_type}`)
-      )
-
-      const TYPES = Object.keys(AUTO_MAIL_DAYS) as AutoMailType[]
-
-      for (const mentor of mentors) {
-        if (!mentor.join_date || !mentor.mentor_email) continue
-
-        for (const type of TYPES) {
-          const targetDate = addDays(mentor.join_date, AUTO_MAIL_DAYS[type])
-          if (debug) {
-            if (!diagnostics.autoMailChecks) diagnostics.autoMailChecks = []
-            ;(diagnostics.autoMailChecks as unknown[]).push({
-              mentor: mentor.mentor_name, type, targetDate, today, match: targetDate === today,
-            })
-          }
-          if (targetDate !== today) continue
-
-          const key = `${mentor.id}:${type}`
-          if (sent.has(key)) continue
-
-          try {
-            const subject = getAutoMailSubject(type, mentor.mentor_name, mentor.join_date)
-            const html    = generateAutoMailHtml(type, mentor.mentor_name, mentor.mentee_name ?? '', mentor.join_date)
-
-            const sendErr = await sendMail({
-              to: [mentor.mentor_email],
-              subject,
-              html,
-            })
-
-            if (!sendErr) {
-              await supabase.from('auto_mail_log').insert({
-                mentor_id: mentor.id,
-                mail_type: type,
-                recipient: mentor.mentor_email,
-                subject,
-              })
-              sent.add(key)
-              results.push({ category: '자동', target: mentor.mentor_name, type, status: 'sent' })
-            } else {
-              results.push({ category: '자동', target: mentor.mentor_name, type, status: `error: ${sendErr}` })
-            }
-          } catch (e) {
-            results.push({ category: '자동', target: mentor.mentor_name, type, status: `exception: ${String(e)}` })
-          }
-        }
-      }
-    }
-
-    console.log(`[cron/auto-mail] ${today} 완료 — ${results.length}건 처리`, results)
+    const sentCount  = results.filter(r => r.status === 'sent').length
+    const errorCount = results.length - sentCount
+    console.log(`[cron/auto-mail] 완료 — 전체 ${results.length}건 (성공 ${sentCount}, 실패 ${errorCount})`)
 
     return NextResponse.json({
-      ok:    true,
-      date:  today,
-      total: results.length,
+      ok:         true,
+      processedAt: nowIso,
+      total:      results.length,
+      sent:       sentCount,
+      errors:     errorCount,
       results,
       ...(debug ? { diagnostics } : {}),
     })
 
   } catch (err) {
-    console.error('[cron/auto-mail] 오류:', err)
+    console.error('[cron/auto-mail] 처리 중 예외:', err)
     return NextResponse.json(
-      { error: String(err), ...(debug ? { diagnostics } : {}) },
+      { ok: false, error: String(err), ...(debug ? { diagnostics } : {}) },
       { status: 500 },
     )
   }
