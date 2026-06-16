@@ -36,6 +36,12 @@ interface DbMentor {
   last_access_at:       string | null
   created_at:           string
   deleted_at:           string | null
+  month1_closed:        boolean | null
+  month1_closed_at:     string | null
+  month2_closed:        boolean | null
+  month2_closed_at:     string | null
+  month3_closed:        boolean | null
+  month3_closed_at:     string | null
 }
 
 interface DbActivity {
@@ -110,6 +116,12 @@ function toRecord(m: DbMentor, acts: DbActivity[]): MentoringRecord {
     lastAccessAt:       m.last_access_at,
     createdAt:          m.created_at,
     deletedAt:          m.deleted_at,
+    month1Closed:   m.month1_closed   ?? false,
+    month1ClosedAt: m.month1_closed_at ?? null,
+    month2Closed:   m.month2_closed   ?? false,
+    month2ClosedAt: m.month2_closed_at ?? null,
+    month3Closed:   m.month3_closed   ?? false,
+    month3ClosedAt: m.month3_closed_at ?? null,
   }
 }
 
@@ -177,6 +189,12 @@ export async function insertMentor(r: MentoringRecord): Promise<void> {
     last_access_at:       r.lastAccessAt,
     created_at:           r.createdAt,
     deleted_at:           r.deletedAt,
+    month1_closed:        r.month1Closed,
+    month1_closed_at:     r.month1ClosedAt,
+    month2_closed:        r.month2Closed,
+    month2_closed_at:     r.month2ClosedAt,
+    month3_closed:        r.month3Closed,
+    month3_closed_at:     r.month3ClosedAt,
   }
   console.log('[insertMentor] payload:', payload)
   const { error } = await supabase.from('mentoring_pairs').insert(payload)
@@ -208,11 +226,35 @@ export type MentorPatch = Partial<{
   link_copied:          boolean
   last_access_at:       string | null
   deleted_at:           string | null
+  month1_closed:        boolean
+  month1_closed_at:     string | null
+  month2_closed:        boolean
+  month2_closed_at:     string | null
+  month3_closed:        boolean
+  month3_closed_at:     string | null
 }>
 
 export async function patchMentor(id: string, fields: MentorPatch): Promise<void> {
   const { error } = await supabase.from('mentoring_pairs').update(fields).eq('id', id)
   if (error) throw error
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Month closure
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function setMonthClosed(
+  mentorId: string,
+  monthIndex: 1 | 2 | 3,
+  closed: boolean,
+): Promise<void> {
+  const now = closed ? new Date().toISOString().slice(0, 10) : null
+  if (monthIndex === 1)
+    await patchMentor(mentorId, { month1_closed: closed, month1_closed_at: now })
+  else if (monthIndex === 2)
+    await patchMentor(mentorId, { month2_closed: closed, month2_closed_at: now })
+  else
+    await patchMentor(mentorId, { month3_closed: closed, month3_closed_at: now })
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

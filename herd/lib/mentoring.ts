@@ -4,7 +4,7 @@
  * React 의존성 없음 (순수 TypeScript)
  */
 
-export const TODAY = '2026-05-27'
+export const TODAY = new Date().toISOString().slice(0, 10)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -66,6 +66,13 @@ export interface MentoringRecord {
   lastAccessAt:       string | null
   createdAt:          string
   deletedAt:          string | null
+  // 월별 수동 마감
+  month1Closed:   boolean
+  month1ClosedAt: string | null
+  month2Closed:   boolean
+  month2ClosedAt: string | null
+  month3Closed:   boolean
+  month3ClosedAt: string | null
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -100,6 +107,13 @@ export function getMonthPeriod(startDate: string, monthIndex: number): { start: 
 /** 해당 monthIndex의 YYYY-MM 반환 */
 export function getMonthYM(startDate: string, monthIndex: number): string {
   return getMonthPeriod(startDate, monthIndex).start.slice(0, 7)
+}
+
+/** 특정 월(monthIndex)이 수동 마감됐는지 여부 */
+export function isMonthManuallyClosed(record: MentoringRecord, monthIndex: 1 | 2 | 3): boolean {
+  if (monthIndex === 1) return record.month1Closed
+  if (monthIndex === 2) return record.month2Closed
+  return record.month3Closed
 }
 
 /** TODAY 기준 현재 몇 개월차인지 (0=대기, 1~3=진행, 4=종료) */
@@ -721,6 +735,9 @@ export const INITIAL_DATA: MentoringRecord[] = [
     endMailSent: false, endMailSentAt: null,
     linkCopied: false, lastAccessAt: null,
     createdAt: '2026-05-01', deletedAt: null,
+    month1Closed: false, month1ClosedAt: null,
+    month2Closed: false, month2ClosedAt: null,
+    month3Closed: false, month3ClosedAt: null,
   },
 
   // ── 2: 2026-04 입사, 1개월차 3회 유효, 2개월차 진행중, 목표 작성 완료
@@ -765,6 +782,9 @@ export const INITIAL_DATA: MentoringRecord[] = [
     endMailSent: false, endMailSentAt: null,
     linkCopied: true, lastAccessAt: '2026-05-20',
     createdAt: '2026-04-01', deletedAt: null,
+    month1Closed: false, month1ClosedAt: null,
+    month2Closed: false, month2ClosedAt: null,
+    month3Closed: false, month3ClosedAt: null,
   },
 
   // ── 3: 2026-03 입사, 1·2개월차 완료, 3개월차 진행중
@@ -816,6 +836,9 @@ export const INITIAL_DATA: MentoringRecord[] = [
     endMailSent: false, endMailSentAt: null,
     linkCopied: true, lastAccessAt: '2026-05-22',
     createdAt: '2026-03-01', deletedAt: null,
+    month1Closed: false, month1ClosedAt: null,
+    month2Closed: false, month2ClosedAt: null,
+    month3Closed: false, month3ClosedAt: null,
   },
 
   // ── 4: 2026-04 입사, 멘티 퇴사로 업로드 차단/중단
@@ -846,5 +869,8 @@ export const INITIAL_DATA: MentoringRecord[] = [
     endMailSent: false, endMailSentAt: null,
     linkCopied: true, lastAccessAt: '2026-04-22',
     createdAt: '2026-04-01', deletedAt: null,
+    month1Closed: false, month1ClosedAt: null,
+    month2Closed: false, month2ClosedAt: null,
+    month3Closed: false, month3ClosedAt: null,
   },
 ]

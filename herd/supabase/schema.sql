@@ -29,7 +29,13 @@ alter table public.mentoring_pairs
   add column if not exists link_copied          boolean not null default false,
   add column if not exists last_access_at       text,
   add column if not exists created_at           text,
-  add column if not exists deleted_at           text;
+  add column if not exists deleted_at           text,
+  add column if not exists month1_closed        boolean not null default false,
+  add column if not exists month1_closed_at     text,
+  add column if not exists month2_closed        boolean not null default false,
+  add column if not exists month2_closed_at     text,
+  add column if not exists month3_closed        boolean not null default false,
+  add column if not exists month3_closed_at     text;
 
 -- token unique constraint (없을 때만 추가)
 do $$ begin

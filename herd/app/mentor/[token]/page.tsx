@@ -9,6 +9,7 @@ import {
   countValidActivities, countAllActivities,
   getMonthActualCost, getMonthPaymentLimit, getMonthlyPayment,
   getTotalExpectedPayment, fmtAmount,
+  isMonthManuallyClosed,
 } from '@/lib/mentoring'
 import {
   fetchMentorByToken, dbInsertActivity, dbUpdateActivity, dbDeleteActivity,
@@ -519,6 +520,7 @@ interface MonthCardProps {
   startDate:          string
   currentMonthIndex:  number
   uploadBlocked:      boolean
+  isManualClosed:     boolean
   onAddActivity:      (entry: Omit<ActivityEntry, 'id'>, photoFile: File, receiptFile?: File) => Promise<void>
   onUpdateActivity:   (updated: ActivityEntry, photoFile?: File, receiptFile?: File) => Promise<void>
   onDeleteActivity:   (activity: ActivityEntry) => void
@@ -526,7 +528,7 @@ interface MonthCardProps {
 
 function MonthCard({
   monthData, monthIndex, startDate, currentMonthIndex,
-  uploadBlocked, onAddActivity, onUpdateActivity, onDeleteActivity,
+  uploadBlocked, isManualClosed, onAddActivity, onUpdateActivity, onDeleteActivity,
 }: MonthCardProps) {
   const [showForm, setShowForm]   = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -537,10 +539,11 @@ function MonthCard({
   const actualCost = getMonthActualCost(monthData)
   const limit      = getMonthPaymentLimit(monthData)
   const amount     = getMonthlyPayment(monthData)
-  const isPast    = currentMonthIndex > monthIndex
-  const isCurrent = currentMonthIndex === monthIndex
-  const isFuture  = currentMonthIndex < monthIndex
-  const isFull    = total >= 5
+  const isPast       = currentMonthIndex > monthIndex
+  const isCurrent    = currentMonthIndex === monthIndex
+  const isFuture     = currentMonthIndex < monthIndex
+  const isEffClosed  = isPast || isManualClosed  // 날짜 자동마감 OR 관리자 수동마감
+  const isFull       = total >= 5
 
   async function handleSave(entry: Omit<ActivityEntry, 'id'>, photoFile: File, receiptFile?: File) {
     await onAddActivity(entry, photoFile, receiptFile)
@@ -670,9 +673,9 @@ function MonthCard({
                     </div>
 
                     {/* 수정 / 삭제 버튼 */}
-                    {isPast ? (
+                    {isEffClosed ? (
                       <span className="flex-shrink-0 text-xs text-gray-400 bg-gray-100 rounded-lg px-2 py-1 whitespace-nowrap">
-                        수정 기간 종료
+                        {isPast ? '기간 종료' : '마감됨'}
                       </span>
                     ) : !uploadBlocked && !isFuture && (
                       <div className="flex-shrink-0 flex gap-1">
@@ -722,12 +725,12 @@ function MonthCard({
         )}
 
         {/* Add button / form */}
-        {isPast && (
+        {isEffClosed && (
           <p className="mt-3 text-xs text-gray-500 text-center bg-gray-100 rounded-lg px-3 py-2.5 border border-gray-200 font-medium">
-            🔒 등록 기간 종료 — 이전 월차 활동은 조회만 가능합니다
+            🔒 해당 월 활동 기간이 마감되어 업로드할 수 없습니다.
           </p>
         )}
-        {!isPast && !isFuture && !uploadBlocked && (
+        {!isEffClosed && !isFuture && !uploadBlocked && (
           <div className="mt-3">
             {showForm ? (
               <ActivityForm onSave={handleSave} onCancel={() => setShowForm(false)} />
@@ -744,7 +747,7 @@ function MonthCard({
         {isFuture && (
           <p className="mt-3 text-xs text-gray-400 text-center">아직 시작되지 않은 기간입니다</p>
         )}
-        {uploadBlocked && !isFuture && !isPast && (
+        {uploadBlocked && !isFuture && !isEffClosed && (
           <p className="mt-3 text-xs text-red-500 text-center bg-red-50 rounded-lg px-3 py-2 border border-red-100">
             현재 업로드가 차단되어 활동 등록 및 수정이 불가합니다. 인재협업팀에 문의해주세요.
           </p>
@@ -1218,6 +1221,7 @@ export default function MentorPage() {
               startDate={record.startDate}
               currentMonthIndex={currentMI}
               uploadBlocked={isBlocked}
+              isManualClosed={isMonthManuallyClosed(record, mi)}
               onAddActivity={(entry, photoFile, receiptFile) => addActivity(mi, entry, photoFile, receiptFile)}
               onUpdateActivity={(updated, photoFile, receiptFile) => updateActivity(mi, updated, photoFile, receiptFile)}
               onDeleteActivity={(activity) => triggerDelete(mi, activity)}
