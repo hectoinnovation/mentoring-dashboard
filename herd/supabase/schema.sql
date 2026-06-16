@@ -35,7 +35,13 @@ alter table public.mentoring_pairs
   add column if not exists month2_closed        boolean not null default false,
   add column if not exists month2_closed_at     text,
   add column if not exists month3_closed        boolean not null default false,
-  add column if not exists month3_closed_at     text;
+  add column if not exists month3_closed_at     text,
+  add column if not exists month1_reopened      boolean not null default false,
+  add column if not exists month1_reopened_at   text,
+  add column if not exists month2_reopened      boolean not null default false,
+  add column if not exists month2_reopened_at   text,
+  add column if not exists month3_reopened      boolean not null default false,
+  add column if not exists month3_reopened_at   text;
 
 -- token unique constraint (없을 때만 추가)
 do $$ begin

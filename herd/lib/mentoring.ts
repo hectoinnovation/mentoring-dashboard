@@ -66,13 +66,19 @@ export interface MentoringRecord {
   lastAccessAt:       string | null
   createdAt:          string
   deletedAt:          string | null
-  // 월별 수동 마감
-  month1Closed:   boolean
-  month1ClosedAt: string | null
-  month2Closed:   boolean
-  month2ClosedAt: string | null
-  month3Closed:   boolean
-  month3ClosedAt: string | null
+  // 월별 마감 (관리자 수동 마감 / 재오픈)
+  month1Closed:      boolean
+  month1ClosedAt:    string | null
+  month2Closed:      boolean
+  month2ClosedAt:    string | null
+  month3Closed:      boolean
+  month3ClosedAt:    string | null
+  month1Reopened:    boolean
+  month1ReopenedAt:  string | null
+  month2Reopened:    boolean
+  month2ReopenedAt:  string | null
+  month3Reopened:    boolean
+  month3ReopenedAt:  string | null
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -109,11 +115,43 @@ export function getMonthYM(startDate: string, monthIndex: number): string {
   return getMonthPeriod(startDate, monthIndex).start.slice(0, 7)
 }
 
-/** 특정 월(monthIndex)이 수동 마감됐는지 여부 */
+/** 활동 월 종료 후 다음달 4일 00:00 = 자동 마감 기준일 (YYYY-MM-04) */
+export function getAutoCloseDate(startDate: string, monthIndex: number): string {
+  const { end } = getMonthPeriod(startDate, monthIndex)
+  const [y, m] = end.split('-').map(Number)
+  const nextM = m === 12 ? 1 : m + 1
+  const nextY = m === 12 ? y + 1 : y
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${nextY}-${pad(nextM)}-04`
+}
+
+/** 오늘이 자동 마감 기준일(다음달 4일) 이후인지 */
+export function isAutoClosedByDate(startDate: string, monthIndex: number): boolean {
+  return TODAY >= getAutoCloseDate(startDate, monthIndex)
+}
+
+/** 관리자가 수동으로 마감한 차수인지 */
 export function isMonthManuallyClosed(record: MentoringRecord, monthIndex: 1 | 2 | 3): boolean {
   if (monthIndex === 1) return record.month1Closed
   if (monthIndex === 2) return record.month2Closed
   return record.month3Closed
+}
+
+/** 관리자가 수동으로 재오픈한 차수인지 */
+export function isMonthReopened(record: MentoringRecord, monthIndex: 1 | 2 | 3): boolean {
+  if (monthIndex === 1) return record.month1Reopened
+  if (monthIndex === 2) return record.month2Reopened
+  return record.month3Reopened
+}
+
+/**
+ * 해당 차수가 실질적으로 마감 상태인지 (업로드 불가 여부)
+ * - 재오픈됨: 항상 false (업로드 가능)
+ * - 자동마감(다음달 4일~) OR 관리자마감: true
+ */
+export function isMonthEffectivelyClosed(record: MentoringRecord, monthIndex: 1 | 2 | 3): boolean {
+  if (isMonthReopened(record, monthIndex)) return false
+  return isAutoClosedByDate(record.startDate, monthIndex) || isMonthManuallyClosed(record, monthIndex)
 }
 
 /** TODAY 기준 현재 몇 개월차인지 (0=대기, 1~3=진행, 4=종료) */
@@ -735,9 +773,9 @@ export const INITIAL_DATA: MentoringRecord[] = [
     endMailSent: false, endMailSentAt: null,
     linkCopied: false, lastAccessAt: null,
     createdAt: '2026-05-01', deletedAt: null,
-    month1Closed: false, month1ClosedAt: null,
-    month2Closed: false, month2ClosedAt: null,
-    month3Closed: false, month3ClosedAt: null,
+    month1Closed: false, month1ClosedAt: null, month1Reopened: false, month1ReopenedAt: null,
+    month2Closed: false, month2ClosedAt: null, month2Reopened: false, month2ReopenedAt: null,
+    month3Closed: false, month3ClosedAt: null, month3Reopened: false, month3ReopenedAt: null,
   },
 
   // ── 2: 2026-04 입사, 1개월차 3회 유효, 2개월차 진행중, 목표 작성 완료
@@ -782,9 +820,9 @@ export const INITIAL_DATA: MentoringRecord[] = [
     endMailSent: false, endMailSentAt: null,
     linkCopied: true, lastAccessAt: '2026-05-20',
     createdAt: '2026-04-01', deletedAt: null,
-    month1Closed: false, month1ClosedAt: null,
-    month2Closed: false, month2ClosedAt: null,
-    month3Closed: false, month3ClosedAt: null,
+    month1Closed: false, month1ClosedAt: null, month1Reopened: false, month1ReopenedAt: null,
+    month2Closed: false, month2ClosedAt: null, month2Reopened: false, month2ReopenedAt: null,
+    month3Closed: false, month3ClosedAt: null, month3Reopened: false, month3ReopenedAt: null,
   },
 
   // ── 3: 2026-03 입사, 1·2개월차 완료, 3개월차 진행중
@@ -836,9 +874,9 @@ export const INITIAL_DATA: MentoringRecord[] = [
     endMailSent: false, endMailSentAt: null,
     linkCopied: true, lastAccessAt: '2026-05-22',
     createdAt: '2026-03-01', deletedAt: null,
-    month1Closed: false, month1ClosedAt: null,
-    month2Closed: false, month2ClosedAt: null,
-    month3Closed: false, month3ClosedAt: null,
+    month1Closed: false, month1ClosedAt: null, month1Reopened: false, month1ReopenedAt: null,
+    month2Closed: false, month2ClosedAt: null, month2Reopened: false, month2ReopenedAt: null,
+    month3Closed: false, month3ClosedAt: null, month3Reopened: false, month3ReopenedAt: null,
   },
 
   // ── 4: 2026-04 입사, 멘티 퇴사로 업로드 차단/중단
@@ -869,8 +907,8 @@ export const INITIAL_DATA: MentoringRecord[] = [
     endMailSent: false, endMailSentAt: null,
     linkCopied: true, lastAccessAt: '2026-04-22',
     createdAt: '2026-04-01', deletedAt: null,
-    month1Closed: false, month1ClosedAt: null,
-    month2Closed: false, month2ClosedAt: null,
-    month3Closed: false, month3ClosedAt: null,
+    month1Closed: false, month1ClosedAt: null, month1Reopened: false, month1ReopenedAt: null,
+    month2Closed: false, month2ClosedAt: null, month2Reopened: false, month2ReopenedAt: null,
+    month3Closed: false, month3ClosedAt: null, month3Reopened: false, month3ReopenedAt: null,
   },
 ]

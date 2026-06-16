@@ -9,7 +9,7 @@ import {
   countValidActivities, countAllActivities,
   getMonthActualCost, getMonthPaymentLimit, getMonthlyPayment,
   getTotalExpectedPayment, fmtAmount,
-  isMonthManuallyClosed,
+  isMonthEffectivelyClosed,
 } from '@/lib/mentoring'
 import {
   fetchMentorByToken, dbInsertActivity, dbUpdateActivity, dbDeleteActivity,
@@ -520,7 +520,7 @@ interface MonthCardProps {
   startDate:          string
   currentMonthIndex:  number
   uploadBlocked:      boolean
-  isManualClosed:     boolean
+  isClosed:           boolean
   onAddActivity:      (entry: Omit<ActivityEntry, 'id'>, photoFile: File, receiptFile?: File) => Promise<void>
   onUpdateActivity:   (updated: ActivityEntry, photoFile?: File, receiptFile?: File) => Promise<void>
   onDeleteActivity:   (activity: ActivityEntry) => void
@@ -528,7 +528,7 @@ interface MonthCardProps {
 
 function MonthCard({
   monthData, monthIndex, startDate, currentMonthIndex,
-  uploadBlocked, isManualClosed, onAddActivity, onUpdateActivity, onDeleteActivity,
+  uploadBlocked, isClosed, onAddActivity, onUpdateActivity, onDeleteActivity,
 }: MonthCardProps) {
   const [showForm, setShowForm]   = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -542,7 +542,7 @@ function MonthCard({
   const isPast       = currentMonthIndex > monthIndex
   const isCurrent    = currentMonthIndex === monthIndex
   const isFuture     = currentMonthIndex < monthIndex
-  const isEffClosed  = isPast || isManualClosed  // 날짜 자동마감 OR 관리자 수동마감
+  const isEffClosed  = isClosed
   const isFull       = total >= 5
 
   async function handleSave(entry: Omit<ActivityEntry, 'id'>, photoFile: File, receiptFile?: File) {
@@ -675,7 +675,7 @@ function MonthCard({
                     {/* 수정 / 삭제 버튼 */}
                     {isEffClosed ? (
                       <span className="flex-shrink-0 text-xs text-gray-400 bg-gray-100 rounded-lg px-2 py-1 whitespace-nowrap">
-                        {isPast ? '기간 종료' : '마감됨'}
+                        마감됨
                       </span>
                     ) : !uploadBlocked && !isFuture && (
                       <div className="flex-shrink-0 flex gap-1">
@@ -1221,7 +1221,7 @@ export default function MentorPage() {
               startDate={record.startDate}
               currentMonthIndex={currentMI}
               uploadBlocked={isBlocked}
-              isManualClosed={isMonthManuallyClosed(record, mi)}
+              isClosed={isMonthEffectivelyClosed(record, mi)}
               onAddActivity={(entry, photoFile, receiptFile) => addActivity(mi, entry, photoFile, receiptFile)}
               onUpdateActivity={(updated, photoFile, receiptFile) => updateActivity(mi, updated, photoFile, receiptFile)}
               onDeleteActivity={(activity) => triggerDelete(mi, activity)}

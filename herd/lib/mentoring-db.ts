@@ -42,6 +42,12 @@ interface DbMentor {
   month2_closed_at:     string | null
   month3_closed:        boolean | null
   month3_closed_at:     string | null
+  month1_reopened:      boolean | null
+  month1_reopened_at:   string | null
+  month2_reopened:      boolean | null
+  month2_reopened_at:   string | null
+  month3_reopened:      boolean | null
+  month3_reopened_at:   string | null
 }
 
 interface DbActivity {
@@ -116,12 +122,18 @@ function toRecord(m: DbMentor, acts: DbActivity[]): MentoringRecord {
     lastAccessAt:       m.last_access_at,
     createdAt:          m.created_at,
     deletedAt:          m.deleted_at,
-    month1Closed:   m.month1_closed   ?? false,
-    month1ClosedAt: m.month1_closed_at ?? null,
-    month2Closed:   m.month2_closed   ?? false,
-    month2ClosedAt: m.month2_closed_at ?? null,
-    month3Closed:   m.month3_closed   ?? false,
-    month3ClosedAt: m.month3_closed_at ?? null,
+    month1Closed:     m.month1_closed     ?? false,
+    month1ClosedAt:   m.month1_closed_at   ?? null,
+    month2Closed:     m.month2_closed     ?? false,
+    month2ClosedAt:   m.month2_closed_at   ?? null,
+    month3Closed:     m.month3_closed     ?? false,
+    month3ClosedAt:   m.month3_closed_at   ?? null,
+    month1Reopened:   m.month1_reopened   ?? false,
+    month1ReopenedAt: m.month1_reopened_at ?? null,
+    month2Reopened:   m.month2_reopened   ?? false,
+    month2ReopenedAt: m.month2_reopened_at ?? null,
+    month3Reopened:   m.month3_reopened   ?? false,
+    month3ReopenedAt: m.month3_reopened_at ?? null,
   }
 }
 
@@ -195,6 +207,12 @@ export async function insertMentor(r: MentoringRecord): Promise<void> {
     month2_closed_at:     r.month2ClosedAt,
     month3_closed:        r.month3Closed,
     month3_closed_at:     r.month3ClosedAt,
+    month1_reopened:      r.month1Reopened,
+    month1_reopened_at:   r.month1ReopenedAt,
+    month2_reopened:      r.month2Reopened,
+    month2_reopened_at:   r.month2ReopenedAt,
+    month3_reopened:      r.month3Reopened,
+    month3_reopened_at:   r.month3ReopenedAt,
   }
   console.log('[insertMentor] payload:', payload)
   const { error } = await supabase.from('mentoring_pairs').insert(payload)
@@ -232,6 +250,12 @@ export type MentorPatch = Partial<{
   month2_closed_at:     string | null
   month3_closed:        boolean
   month3_closed_at:     string | null
+  month1_reopened:      boolean
+  month1_reopened_at:   string | null
+  month2_reopened:      boolean
+  month2_reopened_at:   string | null
+  month3_reopened:      boolean
+  month3_reopened_at:   string | null
 }>
 
 export async function patchMentor(id: string, fields: MentorPatch): Promise<void> {
@@ -246,15 +270,27 @@ export async function patchMentor(id: string, fields: MentorPatch): Promise<void
 export async function setMonthClosed(
   mentorId: string,
   monthIndex: 1 | 2 | 3,
-  closed: boolean,
 ): Promise<void> {
-  const now = closed ? new Date().toISOString().slice(0, 10) : null
+  const now = new Date().toISOString().slice(0, 10)
   if (monthIndex === 1)
-    await patchMentor(mentorId, { month1_closed: closed, month1_closed_at: now })
+    await patchMentor(mentorId, { month1_closed: true, month1_closed_at: now, month1_reopened: false, month1_reopened_at: null })
   else if (monthIndex === 2)
-    await patchMentor(mentorId, { month2_closed: closed, month2_closed_at: now })
+    await patchMentor(mentorId, { month2_closed: true, month2_closed_at: now, month2_reopened: false, month2_reopened_at: null })
   else
-    await patchMentor(mentorId, { month3_closed: closed, month3_closed_at: now })
+    await patchMentor(mentorId, { month3_closed: true, month3_closed_at: now, month3_reopened: false, month3_reopened_at: null })
+}
+
+export async function setMonthReopened(
+  mentorId: string,
+  monthIndex: 1 | 2 | 3,
+): Promise<void> {
+  const now = new Date().toISOString().slice(0, 10)
+  if (monthIndex === 1)
+    await patchMentor(mentorId, { month1_reopened: true, month1_reopened_at: now, month1_closed: false, month1_closed_at: null })
+  else if (monthIndex === 2)
+    await patchMentor(mentorId, { month2_reopened: true, month2_reopened_at: now, month2_closed: false, month2_closed_at: null })
+  else
+    await patchMentor(mentorId, { month3_reopened: true, month3_reopened_at: now, month3_closed: false, month3_closed_at: null })
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -5,18 +5,19 @@ import {
   MentoringRecord, MentoringStatus, UploadStatus, MonthData,
   createEmptyMonths, createEmptyGoals, generateToken,
   calcDatesFromJoinMonth, fmtPeriodMonthly, TODAY,
-  getMonthYM, getMonthPeriod, getCurrentMonthIndex,
+  getMonthYM, getMonthPeriod,
   countValidActivities, countAllActivities,
   getMonthlyPayment, getMonthActualCost, getMonthPaymentLimit,
   fmtAmount,
   generateInitialGuideMailHtml, generateInitialGuideMailBody,
   generateEndMailHtml, generateEndMailBody,
   sendInitialGuideMail, sendEndMail, sendBulkEndMail,
-  getMentoringProgress, isMonthManuallyClosed,
+  getMentoringProgress, isMonthManuallyClosed, isMonthReopened,
+  isMonthEffectivelyClosed, isAutoClosedByDate, getAutoCloseDate,
 } from '@/lib/mentoring'
 import {
   fetchAllMentors, insertMentor, patchMentor, dbDeleteMentor,
-  setMonthClosed,
+  setMonthClosed, setMonthReopened,
 } from '@/lib/mentoring-db'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -416,6 +417,9 @@ export default function AdminDashboard() {
           month1Closed: false, month1ClosedAt: null,
           month2Closed: false, month2ClosedAt: null,
           month3Closed: false, month3ClosedAt: null,
+          month1Reopened: false, month1ReopenedAt: null,
+          month2Reopened: false, month2ReopenedAt: null,
+          month3Reopened: false, month3ReopenedAt: null,
         }
         await insertMentor(newRecord)
         setRecords(prev => [...prev, newRecord])
@@ -483,17 +487,26 @@ export default function AdminDashboard() {
     setBlockTargetId(null)
   }
 
-  async function toggleMonthClose(monthIndex: 1 | 2 | 3, closed: boolean) {
+  async function handleMonthAction(monthIndex: 1 | 2 | 3, action: 'close' | 'reopen') {
     if (!closeModalRecord) return
     try {
-      await setMonthClosed(closeModalRecord.id, monthIndex, closed)
-      const now = closed ? TODAY : null
-      const patch =
-        monthIndex === 1 ? { month1Closed: closed, month1ClosedAt: now } :
-        monthIndex === 2 ? { month2Closed: closed, month2ClosedAt: now } :
-                           { month3Closed: closed, month3ClosedAt: now }
-      setRecords(prev => prev.map(r => r.id === closeModalRecord.id ? { ...r, ...patch } : r))
-      setCloseModalRecord(prev => prev ? { ...prev, ...patch } : prev)
+      if (action === 'close') {
+        await setMonthClosed(closeModalRecord.id, monthIndex)
+        const patch =
+          monthIndex === 1 ? { month1Closed: true, month1ClosedAt: TODAY, month1Reopened: false, month1ReopenedAt: null } :
+          monthIndex === 2 ? { month2Closed: true, month2ClosedAt: TODAY, month2Reopened: false, month2ReopenedAt: null } :
+                             { month3Closed: true, month3ClosedAt: TODAY, month3Reopened: false, month3ReopenedAt: null }
+        setRecords(prev => prev.map(r => r.id === closeModalRecord.id ? { ...r, ...patch } : r))
+        setCloseModalRecord(prev => prev ? { ...prev, ...patch } : prev)
+      } else {
+        await setMonthReopened(closeModalRecord.id, monthIndex)
+        const patch =
+          monthIndex === 1 ? { month1Reopened: true, month1ReopenedAt: TODAY, month1Closed: false, month1ClosedAt: null } :
+          monthIndex === 2 ? { month2Reopened: true, month2ReopenedAt: TODAY, month2Closed: false, month2ClosedAt: null } :
+                             { month3Reopened: true, month3ReopenedAt: TODAY, month3Closed: false, month3ClosedAt: null }
+        setRecords(prev => prev.map(r => r.id === closeModalRecord.id ? { ...r, ...patch } : r))
+        setCloseModalRecord(prev => prev ? { ...prev, ...patch } : prev)
+      }
     } catch (err) {
       const e = err as { message?: string }
       alert(`마감 처리 중 오류가 발생했습니다.\n${e.message ?? String(err)}`)
@@ -975,15 +988,21 @@ export default function AdminDashboard() {
                         <td className="px-4 py-3">
                           <div className="flex flex-col gap-1">
                             {([1, 2, 3] as const).map(mi => {
-                              const isAutoClose = getCurrentMonthIndex(r) > mi
+                              const isAutoClose = isAutoClosedByDate(r.startDate, mi)
                               const isManual    = isMonthManuallyClosed(r, mi)
-                              const isClosed    = isAutoClose || isManual
+                              const isReopened  = isMonthReopened(r, mi)
+                              const isEffClosed = isMonthEffectivelyClosed(r, mi)
+                              const label =
+                                isReopened  ? '재오픈됨' :
+                                isManual    ? '관리자마감' :
+                                isAutoClose ? '자동마감' : '미마감'
+                              const color =
+                                isReopened  ? 'bg-blue-50 text-blue-700' :
+                                isEffClosed ? 'bg-gray-100 text-gray-500' :
+                                              'bg-green-50 text-green-700'
                               return (
-                                <span key={mi} className={`text-xs px-1.5 py-0.5 rounded whitespace-nowrap ${
-                                  isClosed ? 'bg-gray-100 text-gray-500' : 'bg-green-50 text-green-700'
-                                }`}>
-                                  {mi}차: {isClosed ? '마감완료' : '미마감'}
-                                  {isManual && !isAutoClose ? ' (수동)' : ''}
+                                <span key={mi} className={`text-xs px-1.5 py-0.5 rounded whitespace-nowrap ${color}`}>
+                                  {mi}차: {label}
                                 </span>
                               )
                             })}
@@ -1872,7 +1891,6 @@ export default function AdminDashboard() {
 
       {/* Close Month Modal */}
       {closeModalRecord && (() => {
-        const currentMI = getCurrentMonthIndex(closeModalRecord)
         return (
           <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
             <div className="bg-white rounded-xl w-full max-w-md shadow-2xl">
@@ -1887,58 +1905,55 @@ export default function AdminDashboard() {
               </div>
               <div className="px-6 py-4 space-y-3">
                 <p className="text-xs text-gray-500 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2">
-                  자동 마감: 활동 월이 경과한 경우 자동으로 마감됩니다.<br />
-                  수동 마감: 관리자가 특정 차수를 수동으로 마감 처리할 수 있습니다.
+                  자동마감: 활동 월 다음달 4일 00:00에 자동으로 마감됩니다.<br />
+                  관리자마감: 관리자가 특정 차수를 수동으로 마감할 수 있습니다.<br />
+                  다시 열기: 마감된 차수를 다시 업로드 가능 상태로 변경합니다.
                 </p>
                 {([1, 2, 3] as const).map(mi => {
                   const { start, end } = getMonthPeriod(closeModalRecord.startDate, mi)
-                  const ym          = start.slice(0, 7)
-                  const isAutoClose = currentMI > mi
-                  const isManual    = isMonthManuallyClosed(closeModalRecord, mi)
-                  const isClosed    = isAutoClose || isManual
+                  const ym             = start.slice(0, 7)
+                  const autoCloseDate  = getAutoCloseDate(closeModalRecord.startDate, mi)
+                  const isAutoClose    = isAutoClosedByDate(closeModalRecord.startDate, mi)
+                  const isManual       = isMonthManuallyClosed(closeModalRecord, mi)
+                  const isReopened     = isMonthReopened(closeModalRecord, mi)
+                  const isEffClosed    = isMonthEffectivelyClosed(closeModalRecord, mi)
+                  const statusLabel =
+                    isReopened  ? '재오픈됨' :
+                    isManual    ? '관리자마감' :
+                    isAutoClose ? '자동마감' : '미마감'
+                  const statusColor =
+                    isReopened  ? 'bg-blue-100 text-blue-700' :
+                    isEffClosed ? 'bg-gray-200 text-gray-600' :
+                                  'bg-green-100 text-green-700'
+                  const borderColor = isReopened ? 'border-blue-200 bg-blue-50' :
+                                      isEffClosed ? 'border-gray-200 bg-gray-50' : 'border-green-200 bg-green-50'
                   return (
-                    <div key={mi} className={`flex items-center justify-between p-3 rounded-lg border ${
-                      isClosed ? 'border-gray-200 bg-gray-50' : 'border-green-200 bg-green-50'
-                    }`}>
+                    <div key={mi} className={`flex items-center justify-between p-3 rounded-lg border ${borderColor}`}>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-sm font-semibold text-gray-800">{mi}차 활동</span>
                           <span className="text-xs text-gray-400">{ym}</span>
-                          <span className="text-xs text-gray-400">({start.slice(5, 7)}월 {start.slice(8, 10)}일 ~ {end.slice(5, 7)}월 {end.slice(8, 10)}일)</span>
+                          <span className="text-xs text-gray-400">({start.slice(5, 7)}/{start.slice(8, 10)} ~ {end.slice(5, 7)}/{end.slice(8, 10)})</span>
                         </div>
                         <div className="mt-1 flex items-center gap-2 flex-wrap">
-                          {isAutoClose && (
-                            <span className="text-xs px-2 py-0.5 rounded-full bg-gray-200 text-gray-600">자동 마감</span>
-                          )}
-                          {isManual && !isAutoClose && (
-                            <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-600">수동 마감</span>
-                          )}
-                          {!isClosed && (
-                            <span className="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700">미마감</span>
-                          )}
-                          {isManual && closeModalRecord[`month${mi}ClosedAt` as 'month1ClosedAt' | 'month2ClosedAt' | 'month3ClosedAt'] && (
-                            <span className="text-xs text-gray-400">
-                              ({closeModalRecord[`month${mi}ClosedAt` as 'month1ClosedAt' | 'month2ClosedAt' | 'month3ClosedAt']})
-                            </span>
-                          )}
+                          <span className={`text-xs px-2 py-0.5 rounded-full ${statusColor}`}>{statusLabel}</span>
+                          <span className="text-xs text-gray-400">자동마감일: {autoCloseDate}</span>
                         </div>
                       </div>
-                      {!isAutoClose && (
+                      {isEffClosed ? (
                         <button
-                          onClick={() => toggleMonthClose(mi, !isManual)}
-                          className={`ml-3 flex-shrink-0 text-xs px-3 py-1.5 rounded-lg font-medium transition-colors ${
-                            isManual
-                              ? 'bg-green-600 text-white hover:bg-green-700'
-                              : 'bg-red-600 text-white hover:bg-red-700'
-                          }`}
+                          onClick={() => handleMonthAction(mi, 'reopen')}
+                          className="ml-3 flex-shrink-0 text-xs px-3 py-1.5 rounded-lg font-medium bg-blue-600 text-white hover:bg-blue-700 transition-colors"
                         >
-                          {isManual ? '마감해제' : '마감처리'}
+                          다시 열기
                         </button>
-                      )}
-                      {isAutoClose && (
-                        <span className="ml-3 flex-shrink-0 text-xs px-3 py-1.5 rounded-lg bg-gray-200 text-gray-500">
-                          자동마감
-                        </span>
+                      ) : (
+                        <button
+                          onClick={() => handleMonthAction(mi, 'close')}
+                          className="ml-3 flex-shrink-0 text-xs px-3 py-1.5 rounded-lg font-medium bg-red-600 text-white hover:bg-red-700 transition-colors"
+                        >
+                          마감하기
+                        </button>
                       )}
                     </div>
                   )
