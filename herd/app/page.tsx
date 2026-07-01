@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useCallback } from 'react'
 import {
   MentoringRecord, MentoringStatus, UploadStatus, MonthData,
   createEmptyMonths, createEmptyGoals, generateToken,
@@ -224,18 +224,28 @@ export default function AdminDashboard() {
   // ── data
   const [records, setRecords]   = useState<MentoringRecord[]>([])
   const [dbLoading, setDbLoading] = useState(false)
+  const [dbError, setDbError]   = useState<string | null>(null)
   const [saving, setSaving]     = useState(false)
   const [tab, setTab]           = useState<Tab>('manage')
 
   // Supabase에서 전체 멘토 데이터 로드
+  const loadMentors = useCallback(() => {
+    setDbLoading(true)
+    setDbError(null)
+    fetchAllMentors()
+      .then(data => { setRecords(data); setDbError(null) })
+      .catch(err => {
+        console.error('[fetchAllMentors]', err)
+        const e = err as { message?: string }
+        setDbError(e.message ?? String(err))
+      })
+      .finally(() => setDbLoading(false))
+  }, [])
+
   useEffect(() => {
     if (authed !== true) return
-    setDbLoading(true)
-    fetchAllMentors()
-      .then(setRecords)
-      .catch(err => console.error('[fetchAllMentors]', err))
-      .finally(() => setDbLoading(false))
-  }, [authed])
+    loadMentors()
+  }, [authed, loadMentors])
 
   // 예약 메일 로드 (mail 탭 진입 시)
   useEffect(() => {
@@ -927,6 +937,23 @@ export default function AdminDashboard() {
 
       <main className="p-6 max-w-[1400px] mx-auto space-y-6">
 
+        {/* 데이터 로딩 실패 배너 (기존 화면 데이터는 그대로 유지) */}
+        {dbError && (
+          <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 flex items-center justify-between gap-4">
+            <div className="text-sm text-red-700">
+              <span className="font-medium">데이터를 불러오지 못했습니다.</span>{' '}
+              <span className="text-red-500">{dbError}</span>
+            </div>
+            <button
+              onClick={loadMentors}
+              disabled={dbLoading}
+              className="shrink-0 bg-red-600 text-white px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-red-700 disabled:opacity-50"
+            >
+              다시 시도
+            </button>
+          </div>
+        )}
+
         {/* ═══════════════════════════════════════════════════════════════
             Tab: 멘토/멘티관리
         ═══════════════════════════════════════════════════════════════ */}
@@ -953,8 +980,11 @@ export default function AdminDashboard() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
-                    {visible.length === 0 && (
+                    {visible.length === 0 && !dbError && !dbLoading && (
                       <tr><td colSpan={12} className="px-4 py-8 text-center text-gray-400">등록된 멘토링이 없습니다</td></tr>
+                    )}
+                    {visible.length === 0 && dbError && (
+                      <tr><td colSpan={12} className="px-4 py-8 text-center text-red-400">데이터를 불러오지 못했습니다. 위의 &quot;다시 시도&quot; 버튼을 눌러주세요.</td></tr>
                     )}
                     {visible.map(r => (
                       <tr key={r.id} className="hover:bg-gray-50 align-top">

@@ -67,6 +67,27 @@ interface DbActivity {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Error wrapping — 어떤 테이블/작업에서 실패했는지 메시지에 명시
+// ─────────────────────────────────────────────────────────────────────────────
+
+export class DbOperationError extends Error {
+  context: string
+  code?: string
+  details?: string
+  hint?: string
+  constructor(context: string, original: unknown) {
+    const o = original as { message?: string; code?: string; details?: string; hint?: string } | null
+    const baseMsg = o?.message ?? String(original)
+    super(`[${context}] ${baseMsg}`)
+    this.name    = 'DbOperationError'
+    this.context = context
+    this.code    = o?.code
+    this.details = o?.details
+    this.hint    = o?.hint
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Mappers
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -146,8 +167,8 @@ export async function fetchAllMentors(): Promise<MentoringRecord[]> {
     supabase.from('mentoring_pairs').select('*').order('created_at', { ascending: true }),
     supabase.from('activities').select('*').order('created_at', { ascending: true }),
   ])
-  if (mErr) throw mErr
-  if (aErr) throw aErr
+  if (mErr) throw new DbOperationError('mentoring_pairs 조회', mErr)
+  if (aErr) throw new DbOperationError('activities 조회', aErr)
   const acts = (activities ?? []) as DbActivity[]
   return ((mentors ?? []) as DbMentor[]).map(m =>
     toRecord(m, acts.filter(a => a.mentor_id === m.id))
@@ -218,7 +239,7 @@ export async function insertMentor(r: MentoringRecord): Promise<void> {
   const { error } = await supabase.from('mentoring_pairs').insert(payload)
   if (error) {
     console.error('[insertMentor] Supabase error:', error)
-    throw error
+    throw new DbOperationError('mentoring_pairs 등록', error)
   }
 }
 
@@ -260,7 +281,7 @@ export type MentorPatch = Partial<{
 
 export async function patchMentor(id: string, fields: MentorPatch): Promise<void> {
   const { error } = await supabase.from('mentoring_pairs').update(fields).eq('id', id)
-  if (error) throw error
+  if (error) throw new DbOperationError('mentoring_pairs 수정', error)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
