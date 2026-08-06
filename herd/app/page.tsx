@@ -330,6 +330,12 @@ export default function AdminDashboard() {
     [visible],
   )
 
+  // 안내메일 탭: status=active만 조회 대상 (퇴사/기간종료 제외 — 화면 표시 + 발송 대상 모두)
+  const mailEligible = useMemo(() => visible.filter(r => r.status === 'active'), [visible])
+
+  // 최종정산 탭: 퇴사(suspended)는 어떤 경우에도 정산 대상에서 제외. active/completed는 기존 로직 유지
+  const settlementEligible = useMemo(() => visible.filter(r => r.status !== 'suspended'), [visible])
+
   const settlementRows = useMemo(() => {
     const rows: {
       record:     MentoringRecord
@@ -338,7 +344,7 @@ export default function AdminDashboard() {
       limit:      number
       amount:     number
     }[] = []
-    for (const r of visible) {
+    for (const r of settlementEligible) {
       for (const m of r.months) {
         if (getMonthYM(r.startDate, m.monthIndex) === settlementYM) {
           rows.push({
@@ -352,7 +358,7 @@ export default function AdminDashboard() {
       }
     }
     return rows
-  }, [visible, settlementYM])
+  }, [settlementEligible, settlementYM])
 
   // ─────────────────────────────────────────────────────────────────────────
   // CRUD
@@ -706,22 +712,22 @@ export default function AdminDashboard() {
   }
 
   function toggleAllMailSelect() {
-    if (selectedForMail.size === visible.length) {
+    if (selectedForMail.size === mailEligible.length) {
       setSelectedForMail(new Set())
     } else {
-      setSelectedForMail(new Set(visible.map(r => r.id)))
+      setSelectedForMail(new Set(mailEligible.map(r => r.id)))
     }
   }
 
   function bulkSendInitial() {
-    const targets = visible.filter(r => selectedForMail.has(r.id))
+    const targets = mailEligible.filter(r => selectedForMail.has(r.id))
     if (!targets.length) { alert('선택된 멘토가 없습니다.'); return }
     setBulkConfirmTargets(targets)
     setBulkConfirmType('initial')
   }
 
   function bulkSendEnd() {
-    const targets = visible.filter(r => selectedForMail.has(r.id))
+    const targets = mailEligible.filter(r => selectedForMail.has(r.id))
     if (!targets.length) { alert('선택된 멘토가 없습니다.'); return }
     setBulkConfirmTargets(targets)
     setBulkConfirmType('end')
@@ -1300,7 +1306,7 @@ export default function AdminDashboard() {
                     <tr>
                       <th className="px-4 py-2.5 w-10">
                         <input type="checkbox"
-                          checked={visible.length > 0 && selectedForMail.size === visible.length}
+                          checked={mailEligible.length > 0 && selectedForMail.size === mailEligible.length}
                           onChange={toggleAllMailSelect}
                           className="accent-blue-600" />
                       </th>
@@ -1310,10 +1316,10 @@ export default function AdminDashboard() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
-                    {visible.length === 0 && (
+                    {mailEligible.length === 0 && (
                       <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">데이터 없음</td></tr>
                     )}
-                    {visible.map(r => (
+                    {mailEligible.map(r => (
                       <tr key={r.id} className="hover:bg-gray-50">
                         <td className="px-4 py-3">
                           <input type="checkbox"
