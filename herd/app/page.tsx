@@ -311,17 +311,22 @@ export default function AdminDashboard() {
 
   const visible = useMemo(() => records.filter(r => r.status !== 'deleted'), [records])
 
-  // manage 탭: 진행 중 / 퇴사 마감 / 기간 종료 3개 섹션으로 분류 (기존 status 필드만 사용)
-  const activeRecords = useMemo(
-    () => visible.filter(r => r.status === 'active').sort((a, b) => b.startDate.localeCompare(a.startDate)),
-    [visible],
-  )
+  // manage 탭: 진행 중 / 퇴사 마감 / 기간 종료 3개 섹션으로 분류
+  // 우선순위 — 1) 멘티 퇴사(업로드 차단 또는 status=suspended) 2) 멘토링 기간 종료(status=completed) 3) 그 외 = 진행 중
+  const isResignedClosure = (r: MentoringRecord) => r.uploadStatus === 'blocked' || r.status === 'suspended'
+
   const suspendedRecords = useMemo(
-    () => visible.filter(r => r.status === 'suspended').sort((a, b) => b.endDate.localeCompare(a.endDate)),
+    () => visible.filter(isResignedClosure).sort((a, b) => b.endDate.localeCompare(a.endDate)),
     [visible],
   )
   const completedRecords = useMemo(
-    () => visible.filter(r => r.status === 'completed').sort((a, b) => b.endDate.localeCompare(a.endDate)),
+    () => visible.filter(r => !isResignedClosure(r) && r.status === 'completed')
+      .sort((a, b) => b.endDate.localeCompare(a.endDate)),
+    [visible],
+  )
+  const activeRecords = useMemo(
+    () => visible.filter(r => !isResignedClosure(r) && r.status !== 'completed')
+      .sort((a, b) => b.startDate.localeCompare(a.startDate)),
     [visible],
   )
 
