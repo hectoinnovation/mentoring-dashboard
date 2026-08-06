@@ -14,6 +14,7 @@ import {
   sendInitialGuideMail, sendEndMail, sendBulkEndMail,
   getMentoringProgress, isMonthManuallyClosed, isMonthReopened,
   isMonthEffectivelyClosed, isAutoClosedByDate, getAutoCloseDate,
+  getCurrentMonthIndex,
 } from '@/lib/mentoring'
 import {
   fetchAllMentors, insertMentor, patchMentor, dbDeleteMentor,
@@ -311,27 +312,38 @@ export default function AdminDashboard() {
 
   const visible = useMemo(() => records.filter(r => r.status !== 'deleted'), [records])
 
-  // manage 탭: 진행 중 / 퇴사 마감 / 기간 종료 3개 섹션으로 분류
-  // 우선순위 — 1) 멘티 퇴사(업로드 차단 또는 status=suspended) 2) 멘토링 기간 종료(status=completed) 3) 그 외 = 진행 중
+  // ─────────────────────────────────────────────────────────────────────────
+  // 공통 분류 판별 로직 — 관리/안내메일/최종정산 화면이 전부 이 두 함수만 사용한다.
+  // 우선순위: 1) 멘티 퇴사 → 퇴사로 인한 마감  2) 3차 완료/자동마감/관리자마감 → 멘토링 기간 종료  3) 그 외 → 진행 중
+  // ─────────────────────────────────────────────────────────────────────────
+
+  // 1순위: 멘티 퇴사(업로드 차단) 또는 관리자가 status를 '중단'으로 지정한 경우
   const isResignedClosure = (r: MentoringRecord) => r.uploadStatus === 'blocked' || r.status === 'suspended'
+
+  // 2순위: 3차가 완료(활동 제출 후 전체 기간 경과) / 자동마감 / 관리자마감 중 하나라도 해당 (재오픈된 경우는 제외)
+  const isMentoringEnded = (r: MentoringRecord) => {
+    if (isMonthReopened(r, 3)) return false
+    const md3 = r.months.find(m => m.monthIndex === 3)
+    const completed = !!md3 && countAllActivities(md3) > 0 && getCurrentMonthIndex(r) === 4
+    return completed || isMonthManuallyClosed(r, 3) || isAutoClosedByDate(r.startDate, 3)
+  }
 
   const suspendedRecords = useMemo(
     () => visible.filter(isResignedClosure).sort((a, b) => b.endDate.localeCompare(a.endDate)),
     [visible],
   )
   const completedRecords = useMemo(
-    () => visible.filter(r => !isResignedClosure(r) && r.status === 'completed')
+    () => visible.filter(r => !isResignedClosure(r) && isMentoringEnded(r))
       .sort((a, b) => b.endDate.localeCompare(a.endDate)),
     [visible],
   )
   const activeRecords = useMemo(
-    () => visible.filter(r => !isResignedClosure(r) && r.status !== 'completed')
+    () => visible.filter(r => !isResignedClosure(r) && !isMentoringEnded(r))
       .sort((a, b) => b.startDate.localeCompare(a.startDate)),
     [visible],
   )
 
   // 안내메일 탭: '진행 중'(activeRecords)과 동일한 대상만 조회 (퇴사/기간종료 제외 — 화면 표시 + 발송 대상 모두)
-  // isResignedClosure로 판정하므로 status=suspended뿐 아니라 uploadStatus=blocked(퇴사 처리)도 함께 제외됨
   const mailEligible = activeRecords
 
   // 최종정산 탭:
@@ -365,6 +377,23 @@ export default function AdminDashboard() {
     }
     return rows
   }, [visible, settlementYM])
+
+  // 퇴사(퇴사로 인한 마감) 또는 멘토링 종료 처리된 대상에게 남아있는 예약(pending) 안내메일 자동 취소
+  useEffect(() => {
+    const ineligibleIds = new Set([...suspendedRecords, ...completedRecords].map(r => r.id))
+    const toCancel = scheduledMails.filter(m => m.status === 'pending' && m.mentor_id && ineligibleIds.has(m.mentor_id))
+    if (toCancel.length === 0) return
+    toCancel.forEach(m => {
+      fetch('/api/scheduled-mails', {
+        method:  'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ id: m.id }),
+      }).catch(err => console.error('[auto-cancel scheduled mail]', err))
+    })
+    setScheduledMails(prev => prev.map(m =>
+      toCancel.some(t => t.id === m.id) ? { ...m, status: 'cancelled' as const } : m
+    ))
+  }, [scheduledMails, suspendedRecords, completedRecords])
 
   // ─────────────────────────────────────────────────────────────────────────
   // CRUD
