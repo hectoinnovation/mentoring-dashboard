@@ -330,11 +330,12 @@ export default function AdminDashboard() {
     [visible],
   )
 
-  // 안내메일 탭: status=active만 조회 대상 (퇴사/기간종료 제외 — 화면 표시 + 발송 대상 모두)
-  const mailEligible = useMemo(() => visible.filter(r => r.status === 'active'), [visible])
+  // 안내메일 탭: '진행 중'(activeRecords)과 동일한 대상만 조회 (퇴사/기간종료 제외 — 화면 표시 + 발송 대상 모두)
+  // isResignedClosure로 판정하므로 status=suspended뿐 아니라 uploadStatus=blocked(퇴사 처리)도 함께 제외됨
+  const mailEligible = activeRecords
 
-  // 최종정산 탭: 퇴사(suspended)는 어떤 경우에도 정산 대상에서 제외. active/completed는 기존 로직 유지
-  const settlementEligible = useMemo(() => visible.filter(r => r.status !== 'suspended'), [visible])
+  // 최종정산 탭: 퇴사(isResignedClosure=true)는 어떤 경우에도 정산 대상에서 제외. active/completed는 기존 로직 유지
+  const settlementEligible = useMemo(() => visible.filter(r => !isResignedClosure(r)), [visible])
 
   const settlementRows = useMemo(() => {
     const rows: {
