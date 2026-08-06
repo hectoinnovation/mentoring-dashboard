@@ -1003,7 +1003,14 @@ export default function AdminDashboard() {
     )
   }
 
-  function renderMentorTable(rows: MentoringRecord[], emptyMessage: string) {
+  function renderMentorTable(rows: MentoringRecord[]) {
+    if (rows.length === 0) {
+      return (
+        <div className="bg-white rounded-lg border border-gray-200 px-4 py-8 text-center text-gray-400 text-sm">
+          데이터가 없습니다.
+        </div>
+      )
+    }
     return (
       <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
         <div className="overflow-x-auto">
@@ -1016,9 +1023,6 @@ export default function AdminDashboard() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {rows.length === 0 && (
-                <tr><td colSpan={12} className="px-4 py-8 text-center text-gray-400">{emptyMessage}</td></tr>
-              )}
               {rows.map(renderMentorRow)}
             </tbody>
           </table>
@@ -1118,52 +1122,45 @@ export default function AdminDashboard() {
               </button>
             </div>
 
-            {visible.length === 0 && !dbError && !dbLoading && (
-              <div className="bg-white rounded-lg border border-gray-200 px-4 py-8 text-center text-gray-400 text-sm">
-                등록된 멘토링이 없습니다
-              </div>
-            )}
-            {visible.length === 0 && dbError && (
-              <div className="bg-white rounded-lg border border-gray-200 px-4 py-8 text-center text-red-400 text-sm">
+            {dbError && (
+              <div className="bg-white rounded-lg border border-gray-200 px-4 py-3 text-center text-red-400 text-sm">
                 데이터를 불러오지 못했습니다. 위의 &quot;다시 시도&quot; 버튼을 눌러주세요.
               </div>
             )}
 
-            {visible.length > 0 && (
-              <div className="space-y-6">
-                {/* 🟢 진행 중 — 항상 펼침 */}
-                <div>
-                  <h3 className="font-semibold text-gray-700 mb-2">
-                    🟢 진행 중 <span className="text-gray-400 font-normal">({activeRecords.length}건)</span>
-                  </h3>
-                  {renderMentorTable(activeRecords, '진행 중인 멘토링이 없습니다')}
-                </div>
-
-                {/* 🔴 퇴사로 인한 마감 — 기본 접힘 */}
-                <div>
-                  <button
-                    onClick={() => setSectionOpen(p => ({ ...p, suspended: !p.suspended }))}
-                    className="w-full flex items-center justify-between font-semibold text-gray-700 mb-2 py-1 hover:text-gray-900"
-                  >
-                    <span>🔴 퇴사로 인한 마감 <span className="text-gray-400 font-normal">({suspendedRecords.length}건)</span></span>
-                    <span className="text-xs text-gray-400">{sectionOpen.suspended ? '▲ 접기' : '▼ 펼치기'}</span>
-                  </button>
-                  {sectionOpen.suspended && renderMentorTable(suspendedRecords, '퇴사로 마감된 멘토링이 없습니다')}
-                </div>
-
-                {/* ⚪ 멘토링 기간 종료 — 기본 접힘 */}
-                <div>
-                  <button
-                    onClick={() => setSectionOpen(p => ({ ...p, completed: !p.completed }))}
-                    className="w-full flex items-center justify-between font-semibold text-gray-700 mb-2 py-1 hover:text-gray-900"
-                  >
-                    <span>⚪ 멘토링 기간 종료 <span className="text-gray-400 font-normal">({completedRecords.length}건)</span></span>
-                    <span className="text-xs text-gray-400">{sectionOpen.completed ? '▲ 접기' : '▼ 펼치기'}</span>
-                  </button>
-                  {sectionOpen.completed && renderMentorTable(completedRecords, '기간 종료된 멘토링이 없습니다')}
-                </div>
+            <div className="space-y-6">
+              {/* 🟢 진행 중 — 항상 펼침 */}
+              <div>
+                <h3 className="font-semibold text-gray-700 mb-2">
+                  🟢 진행 중 <span className="text-gray-400 font-normal">({activeRecords.length}건)</span>
+                </h3>
+                {renderMentorTable(activeRecords)}
               </div>
-            )}
+
+              {/* 🔴 퇴사로 인한 마감 — 기본 접힘 */}
+              <div>
+                <button
+                  onClick={() => setSectionOpen(p => ({ ...p, suspended: !p.suspended }))}
+                  className="w-full flex items-center justify-between font-semibold text-gray-700 mb-2 py-1 hover:text-gray-900"
+                >
+                  <span>🔴 퇴사로 인한 마감 <span className="text-gray-400 font-normal">({suspendedRecords.length}건)</span></span>
+                  <span className="text-xs text-gray-400">{sectionOpen.suspended ? '▲ 접기' : '▼ 펼치기'}</span>
+                </button>
+                {sectionOpen.suspended && renderMentorTable(suspendedRecords)}
+              </div>
+
+              {/* ⚪ 멘토링 기간 종료 — 기본 접힘 */}
+              <div>
+                <button
+                  onClick={() => setSectionOpen(p => ({ ...p, completed: !p.completed }))}
+                  className="w-full flex items-center justify-between font-semibold text-gray-700 mb-2 py-1 hover:text-gray-900"
+                >
+                  <span>⚪ 멘토링 기간 종료 <span className="text-gray-400 font-normal">({completedRecords.length}건)</span></span>
+                  <span className="text-xs text-gray-400">{sectionOpen.completed ? '▲ 접기' : '▼ 펼치기'}</span>
+                </button>
+                {sectionOpen.completed && renderMentorTable(completedRecords)}
+              </div>
+            </div>
           </>
         )}
 
