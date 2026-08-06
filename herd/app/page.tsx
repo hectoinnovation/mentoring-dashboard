@@ -300,12 +300,30 @@ export default function AdminDashboard() {
   const [filePreviewRecord, setFilePreviewRecord] = useState<MentoringRecord | null>(null)
   const [lightboxUrl, setLightboxUrl]             = useState<string | null>(null)
 
+  // ── manage 탭 섹션 아코디언 (진행 중은 항상 펼침)
+  const [sectionOpen, setSectionOpen] = useState<{ suspended: boolean; completed: boolean }>({
+    suspended: false, completed: false,
+  })
 
   // ─────────────────────────────────────────────────────────────────────────
   // Derived
   // ─────────────────────────────────────────────────────────────────────────
 
   const visible = useMemo(() => records.filter(r => r.status !== 'deleted'), [records])
+
+  // manage 탭: 진행 중 / 퇴사 마감 / 기간 종료 3개 섹션으로 분류 (기존 status 필드만 사용)
+  const activeRecords = useMemo(
+    () => visible.filter(r => r.status === 'active').sort((a, b) => b.startDate.localeCompare(a.startDate)),
+    [visible],
+  )
+  const suspendedRecords = useMemo(
+    () => visible.filter(r => r.status === 'suspended').sort((a, b) => b.endDate.localeCompare(a.endDate)),
+    [visible],
+  )
+  const completedRecords = useMemo(
+    () => visible.filter(r => r.status === 'completed').sort((a, b) => b.endDate.localeCompare(a.endDate)),
+    [visible],
+  )
 
   const settlementRows = useMemo(() => {
     const rows: {
@@ -879,6 +897,137 @@ export default function AdminDashboard() {
   if (!authed) return <LoginScreen onAuth={() => setAuthed(true)} />
 
   // ─────────────────────────────────────────────────────────────────────────
+  // manage 탭: 멘토 테이블 렌더링 (3개 섹션에서 공유)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  function renderMentorRow(r: MentoringRecord) {
+    return (
+      <tr key={r.id} className="hover:bg-gray-50 align-top">
+        <td className="px-4 py-3 font-medium whitespace-nowrap">{r.mentorName}</td>
+        <td className="px-4 py-3 text-gray-500 text-xs">{r.mentorEmail}</td>
+        <td className="px-4 py-3 whitespace-nowrap">{r.menteeName}</td>
+        <td className="px-4 py-3 text-gray-500 text-xs whitespace-nowrap">{r.joinDate}</td>
+        <td className="px-4 py-3 text-gray-500 text-xs whitespace-nowrap">
+          {fmtPeriodMonthly(r.startDate, r.endDate)}
+        </td>
+        <td className="px-4 py-3">
+          <div className="flex flex-wrap gap-1">
+            {getMentoringProgress(r).map((b, i) => (
+              <Chip key={i} label={b.text} color={b.color} />
+            ))}
+          </div>
+        </td>
+        <td className="px-4 py-3">
+          <Chip label={STATUS_LABEL[r.status]} color={STATUS_COLOR[r.status]} />
+        </td>
+        <td className="px-4 py-3">
+          {r.uploadStatus === 'blocked' ? (
+            <div>
+              <Chip label="차단" color="bg-red-100 text-red-600" />
+              {r.uploadBlockReason && <p className="text-xs text-gray-400 mt-0.5">{r.uploadBlockReason}</p>}
+            </div>
+          ) : (
+            <Chip label="정상" color="bg-green-100 text-green-600" />
+          )}
+        </td>
+        <td className="px-4 py-3">
+          <div className="flex flex-col gap-1">
+            {([1, 2, 3] as const).map(mi => {
+              const isAutoClose = isAutoClosedByDate(r.startDate, mi)
+              const isManual    = isMonthManuallyClosed(r, mi)
+              const isReopened  = isMonthReopened(r, mi)
+              const isEffClosed = isMonthEffectivelyClosed(r, mi)
+              const label =
+                isReopened  ? '재오픈됨' :
+                isManual    ? '관리자마감' :
+                isAutoClose ? '자동마감' : '미마감'
+              const color =
+                isReopened  ? 'bg-blue-50 text-blue-700' :
+                isEffClosed ? 'bg-gray-100 text-gray-500' :
+                              'bg-green-50 text-green-700'
+              return (
+                <span key={mi} className={`text-xs px-1.5 py-0.5 rounded whitespace-nowrap ${color}`}>
+                  {mi}차: {label}
+                </span>
+              )
+            })}
+          </div>
+        </td>
+        <td className="px-4 py-3">
+          {r.goals.savedAt
+            ? <Chip label="완료" color="bg-blue-100 text-blue-600" />
+            : <Chip label="미작성" color="bg-gray-100 text-gray-400" />}
+        </td>
+        <td className="px-4 py-3 text-gray-500 text-xs max-w-[80px] truncate">{r.note || '—'}</td>
+        <td className="px-4 py-3">
+          <div className="flex flex-wrap gap-1.5">
+            <a href={`/mentor/${r.token}`} target="_blank" rel="noopener noreferrer"
+              className="text-xs px-2.5 py-1 rounded bg-gray-100 hover:bg-gray-200 text-gray-700 whitespace-nowrap">
+              멘토화면
+            </a>
+            <button onClick={() => copyLink(r)}
+              className="text-xs px-2.5 py-1 rounded bg-blue-50 hover:bg-blue-100 text-blue-700 whitespace-nowrap">
+              링크복사{r.linkCopied ? ' ✓' : ''}
+            </button>
+            <button onClick={() => openGoalsModal(r)}
+              className="text-xs px-2.5 py-1 rounded bg-purple-50 hover:bg-purple-100 text-purple-700 whitespace-nowrap">
+              목표
+            </button>
+            <button onClick={() => openEdit(r)}
+              className="text-xs px-2.5 py-1 rounded bg-gray-100 hover:bg-gray-200 text-gray-700">
+              편집
+            </button>
+            <button onClick={() => toggleBlock(r)}
+              className={`text-xs px-2.5 py-1 rounded whitespace-nowrap ${
+                r.uploadStatus === 'blocked'
+                  ? 'bg-green-50 hover:bg-green-100 text-green-700'
+                  : 'bg-orange-50 hover:bg-orange-100 text-orange-700'
+              }`}>
+              {r.uploadStatus === 'blocked' ? '차단해제' : '업로드차단'}
+            </button>
+            <button onClick={() => setCloseModalRecord(r)}
+              className="text-xs px-2.5 py-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 whitespace-nowrap">
+              마감관리
+            </button>
+            <button onClick={() => setFilePreviewRecord(r)}
+              className="text-xs px-2.5 py-1 rounded bg-teal-50 hover:bg-teal-100 text-teal-700 whitespace-nowrap">
+              사진/영수증
+            </button>
+            <button onClick={() => setDeleteTargetId(r.id)}
+              className="text-xs px-2.5 py-1 rounded bg-red-50 hover:bg-red-100 text-red-600">
+              삭제
+            </button>
+          </div>
+        </td>
+      </tr>
+    )
+  }
+
+  function renderMentorTable(rows: MentoringRecord[], emptyMessage: string) {
+    return (
+      <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 text-gray-600">
+              <tr>
+                {['멘토', '멘토 이메일', '멘티', '입사일', '활동기간', '진행현황', '상태', '업로드', '마감현황', '목표', '메모', '관리'].map(h => (
+                  <th key={h} className="px-4 py-2.5 text-left font-medium whitespace-nowrap">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {rows.length === 0 && (
+                <tr><td colSpan={12} className="px-4 py-8 text-center text-gray-400">{emptyMessage}</td></tr>
+              )}
+              {rows.map(renderMentorRow)}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    )
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
   // Render
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -969,127 +1118,52 @@ export default function AdminDashboard() {
               </button>
             </div>
 
-            <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50 text-gray-600">
-                    <tr>
-                      {['멘토', '멘토 이메일', '멘티', '입사일', '활동기간', '진행현황', '상태', '업로드', '마감현황', '목표', '메모', '관리'].map(h => (
-                        <th key={h} className="px-4 py-2.5 text-left font-medium whitespace-nowrap">{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {visible.length === 0 && !dbError && !dbLoading && (
-                      <tr><td colSpan={12} className="px-4 py-8 text-center text-gray-400">등록된 멘토링이 없습니다</td></tr>
-                    )}
-                    {visible.length === 0 && dbError && (
-                      <tr><td colSpan={12} className="px-4 py-8 text-center text-red-400">데이터를 불러오지 못했습니다. 위의 &quot;다시 시도&quot; 버튼을 눌러주세요.</td></tr>
-                    )}
-                    {visible.map(r => (
-                      <tr key={r.id} className="hover:bg-gray-50 align-top">
-                        <td className="px-4 py-3 font-medium whitespace-nowrap">{r.mentorName}</td>
-                        <td className="px-4 py-3 text-gray-500 text-xs">{r.mentorEmail}</td>
-                        <td className="px-4 py-3 whitespace-nowrap">{r.menteeName}</td>
-                        <td className="px-4 py-3 text-gray-500 text-xs whitespace-nowrap">{r.joinDate}</td>
-                        <td className="px-4 py-3 text-gray-500 text-xs whitespace-nowrap">
-                          {fmtPeriodMonthly(r.startDate, r.endDate)}
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="flex flex-wrap gap-1">
-                            {getMentoringProgress(r).map((b, i) => (
-                              <Chip key={i} label={b.text} color={b.color} />
-                            ))}
-                          </div>
-                        </td>
-                        <td className="px-4 py-3">
-                          <Chip label={STATUS_LABEL[r.status]} color={STATUS_COLOR[r.status]} />
-                        </td>
-                        <td className="px-4 py-3">
-                          {r.uploadStatus === 'blocked' ? (
-                            <div>
-                              <Chip label="차단" color="bg-red-100 text-red-600" />
-                              {r.uploadBlockReason && <p className="text-xs text-gray-400 mt-0.5">{r.uploadBlockReason}</p>}
-                            </div>
-                          ) : (
-                            <Chip label="정상" color="bg-green-100 text-green-600" />
-                          )}
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="flex flex-col gap-1">
-                            {([1, 2, 3] as const).map(mi => {
-                              const isAutoClose = isAutoClosedByDate(r.startDate, mi)
-                              const isManual    = isMonthManuallyClosed(r, mi)
-                              const isReopened  = isMonthReopened(r, mi)
-                              const isEffClosed = isMonthEffectivelyClosed(r, mi)
-                              const label =
-                                isReopened  ? '재오픈됨' :
-                                isManual    ? '관리자마감' :
-                                isAutoClose ? '자동마감' : '미마감'
-                              const color =
-                                isReopened  ? 'bg-blue-50 text-blue-700' :
-                                isEffClosed ? 'bg-gray-100 text-gray-500' :
-                                              'bg-green-50 text-green-700'
-                              return (
-                                <span key={mi} className={`text-xs px-1.5 py-0.5 rounded whitespace-nowrap ${color}`}>
-                                  {mi}차: {label}
-                                </span>
-                              )
-                            })}
-                          </div>
-                        </td>
-                        <td className="px-4 py-3">
-                          {r.goals.savedAt
-                            ? <Chip label="완료" color="bg-blue-100 text-blue-600" />
-                            : <Chip label="미작성" color="bg-gray-100 text-gray-400" />}
-                        </td>
-                        <td className="px-4 py-3 text-gray-500 text-xs max-w-[80px] truncate">{r.note || '—'}</td>
-                        <td className="px-4 py-3">
-                          <div className="flex flex-wrap gap-1.5">
-                            <a href={`/mentor/${r.token}`} target="_blank" rel="noopener noreferrer"
-                              className="text-xs px-2.5 py-1 rounded bg-gray-100 hover:bg-gray-200 text-gray-700 whitespace-nowrap">
-                              멘토화면
-                            </a>
-                            <button onClick={() => copyLink(r)}
-                              className="text-xs px-2.5 py-1 rounded bg-blue-50 hover:bg-blue-100 text-blue-700 whitespace-nowrap">
-                              링크복사{r.linkCopied ? ' ✓' : ''}
-                            </button>
-                            <button onClick={() => openGoalsModal(r)}
-                              className="text-xs px-2.5 py-1 rounded bg-purple-50 hover:bg-purple-100 text-purple-700 whitespace-nowrap">
-                              목표
-                            </button>
-                            <button onClick={() => openEdit(r)}
-                              className="text-xs px-2.5 py-1 rounded bg-gray-100 hover:bg-gray-200 text-gray-700">
-                              편집
-                            </button>
-                            <button onClick={() => toggleBlock(r)}
-                              className={`text-xs px-2.5 py-1 rounded whitespace-nowrap ${
-                                r.uploadStatus === 'blocked'
-                                  ? 'bg-green-50 hover:bg-green-100 text-green-700'
-                                  : 'bg-orange-50 hover:bg-orange-100 text-orange-700'
-                              }`}>
-                              {r.uploadStatus === 'blocked' ? '차단해제' : '업로드차단'}
-                            </button>
-                            <button onClick={() => setCloseModalRecord(r)}
-                              className="text-xs px-2.5 py-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 whitespace-nowrap">
-                              마감관리
-                            </button>
-                            <button onClick={() => setFilePreviewRecord(r)}
-                              className="text-xs px-2.5 py-1 rounded bg-teal-50 hover:bg-teal-100 text-teal-700 whitespace-nowrap">
-                              사진/영수증
-                            </button>
-                            <button onClick={() => setDeleteTargetId(r.id)}
-                              className="text-xs px-2.5 py-1 rounded bg-red-50 hover:bg-red-100 text-red-600">
-                              삭제
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+            {visible.length === 0 && !dbError && !dbLoading && (
+              <div className="bg-white rounded-lg border border-gray-200 px-4 py-8 text-center text-gray-400 text-sm">
+                등록된 멘토링이 없습니다
               </div>
-            </div>
+            )}
+            {visible.length === 0 && dbError && (
+              <div className="bg-white rounded-lg border border-gray-200 px-4 py-8 text-center text-red-400 text-sm">
+                데이터를 불러오지 못했습니다. 위의 &quot;다시 시도&quot; 버튼을 눌러주세요.
+              </div>
+            )}
+
+            {visible.length > 0 && (
+              <div className="space-y-6">
+                {/* 🟢 진행 중 — 항상 펼침 */}
+                <div>
+                  <h3 className="font-semibold text-gray-700 mb-2">
+                    🟢 진행 중 <span className="text-gray-400 font-normal">({activeRecords.length}건)</span>
+                  </h3>
+                  {renderMentorTable(activeRecords, '진행 중인 멘토링이 없습니다')}
+                </div>
+
+                {/* 🔴 퇴사로 인한 마감 — 기본 접힘 */}
+                <div>
+                  <button
+                    onClick={() => setSectionOpen(p => ({ ...p, suspended: !p.suspended }))}
+                    className="w-full flex items-center justify-between font-semibold text-gray-700 mb-2 py-1 hover:text-gray-900"
+                  >
+                    <span>🔴 퇴사로 인한 마감 <span className="text-gray-400 font-normal">({suspendedRecords.length}건)</span></span>
+                    <span className="text-xs text-gray-400">{sectionOpen.suspended ? '▲ 접기' : '▼ 펼치기'}</span>
+                  </button>
+                  {sectionOpen.suspended && renderMentorTable(suspendedRecords, '퇴사로 마감된 멘토링이 없습니다')}
+                </div>
+
+                {/* ⚪ 멘토링 기간 종료 — 기본 접힘 */}
+                <div>
+                  <button
+                    onClick={() => setSectionOpen(p => ({ ...p, completed: !p.completed }))}
+                    className="w-full flex items-center justify-between font-semibold text-gray-700 mb-2 py-1 hover:text-gray-900"
+                  >
+                    <span>⚪ 멘토링 기간 종료 <span className="text-gray-400 font-normal">({completedRecords.length}건)</span></span>
+                    <span className="text-xs text-gray-400">{sectionOpen.completed ? '▲ 접기' : '▼ 펼치기'}</span>
+                  </button>
+                  {sectionOpen.completed && renderMentorTable(completedRecords, '기간 종료된 멘토링이 없습니다')}
+                </div>
+              </div>
+            )}
           </>
         )}
 
