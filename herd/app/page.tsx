@@ -334,9 +334,11 @@ export default function AdminDashboard() {
   // isResignedClosure로 판정하므로 status=suspended뿐 아니라 uploadStatus=blocked(퇴사 처리)도 함께 제외됨
   const mailEligible = activeRecords
 
-  // 최종정산 탭: 퇴사(isResignedClosure=true)는 어떤 경우에도 정산 대상에서 제외. active/completed는 기존 로직 유지
-  const settlementEligible = useMemo(() => visible.filter(r => !isResignedClosure(r)), [visible])
-
+  // 최종정산 탭:
+  // - 재직자(isResignedClosure=false): 기존과 동일하게 전부 표시
+  // - 퇴사자(isResignedClosure=true): 퇴사 전 활동으로 발생한 정산 데이터는 그대로 유지해 표시하되,
+  //   지급예상금액(amount)이 0원이면 목록에서 제외. 퇴사 후에는 업로드 차단으로 신규 활동이 생기지 않으므로
+  //   months 데이터는 퇴사 시점에 자연히 고정된다.
   const settlementRows = useMemo(() => {
     const rows: {
       record:     MentoringRecord
@@ -345,21 +347,24 @@ export default function AdminDashboard() {
       limit:      number
       amount:     number
     }[] = []
-    for (const r of settlementEligible) {
+    for (const r of visible) {
+      const resigned = isResignedClosure(r)
       for (const m of r.months) {
         if (getMonthYM(r.startDate, m.monthIndex) === settlementYM) {
+          const amount = getMonthlyPayment(m)
+          if (resigned && amount <= 0) continue
           rows.push({
             record:     r,
             monthIndex: m.monthIndex,
             actualCost: getMonthActualCost(m),
             limit:      getMonthPaymentLimit(m),
-            amount:     getMonthlyPayment(m),
+            amount,
           })
         }
       }
     }
     return rows
-  }, [settlementEligible, settlementYM])
+  }, [visible, settlementYM])
 
   // ─────────────────────────────────────────────────────────────────────────
   // CRUD
