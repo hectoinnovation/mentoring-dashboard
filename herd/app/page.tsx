@@ -62,6 +62,11 @@ function isPdfFile(url: string): boolean {
   return ext === 'pdf'
 }
 
+/** 종료안내 메일: DB의 발송 이력은 그대로 두되, "이번 달에 발송했는지"만 화면에서 판단 (초기안내 메일은 대상 아님) */
+function isEndMailSentThisMonth(r: MentoringRecord): boolean {
+  return r.endMailSent && !!r.endMailSentAt && r.endMailSentAt.slice(0, 7) === TODAY.slice(0, 7)
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Form state
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1378,12 +1383,12 @@ export default function AdminDashboard() {
                         </td>
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-2 flex-wrap">
-                            {r.endMailSent && (
+                            {isEndMailSentThisMonth(r) && (
                               <span className="text-xs text-green-600 whitespace-nowrap">✓ {r.endMailSentAt}</span>
                             )}
                             <button onClick={() => { setMailPreviewRecord(r); setMailPreviewType('end') }}
                               className="text-xs px-3 py-1.5 rounded bg-indigo-600 text-white hover:bg-indigo-700 whitespace-nowrap">
-                              {r.endMailSent ? '재발송' : '발송'}
+                              {isEndMailSentThisMonth(r) ? '재발송' : '발송'}
                             </button>
                           </div>
                         </td>
