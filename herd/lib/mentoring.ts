@@ -281,41 +281,28 @@ export function getMentoringProgress(record: MentoringRecord): ProgressBadge[] {
   }
 
   // ci = 1, 2, 3 — 진행 중
-  const completedNums: number[] = []
-  const unsubBadges: ProgressBadge[] = []
+  // 지난 회차(1..ci-1)를 회차 순서 그대로 배지로 만들고, 마지막에 현재 진행 중인 회차를 추가한다.
+  // (완료된 회차를 하나로 합쳐 앞에 몰아주던 이전 로직은 순서가 뒤섞이는 원인이라 제거)
+  const result: ProgressBadge[] = []
 
-  for (let mi = 1; mi <= 3; mi++) {
+  for (let mi = 1; mi < ci; mi++) {
     const md = record.months.find(m => m.monthIndex === mi)!
-    if (mi < ci) {
-      // 지난 달: 활동 등록 여부로 완료 판단
-      if (countAllActivities(md) > 0) {
-        completedNums.push(mi)
-      } else {
-        const { end } = getMonthPeriod(record.startDate, mi)
-        const [y, mo] = end.split('-').map(Number)
-        const nm      = mo === 12 ? 1 : mo + 1
-        const ny      = mo === 12 ? y + 1 : y
-        const deadline = `${ny}-${String(nm).padStart(2, '0')}-02`
-        const overdue  = TODAY >= deadline
-        unsubBadges.push({
-          text:  `${mi}차 미제출${overdue ? ' 마감' : ''}`,
-          color: overdue ? 'bg-red-100 text-red-600' : 'bg-gray-100 text-gray-500',
-        })
-      }
+    if (countAllActivities(md) > 0) {
+      result.push({ text: `${mi}차 완료`, color: 'bg-blue-100 text-blue-700' })
+    } else {
+      const { end } = getMonthPeriod(record.startDate, mi)
+      const [y, mo] = end.split('-').map(Number)
+      const nm      = mo === 12 ? 1 : mo + 1
+      const ny      = mo === 12 ? y + 1 : y
+      const deadline = `${ny}-${String(nm).padStart(2, '0')}-02`
+      const overdue  = TODAY >= deadline
+      result.push({
+        text:  `${mi}차 미제출${overdue ? ' 마감' : ''}`,
+        color: overdue ? 'bg-red-100 text-red-600' : 'bg-gray-100 text-gray-500',
+      })
     }
   }
 
-  if (completedNums.length === 3)
-    return [{ text: '전체 완료', color: 'bg-blue-100 text-blue-700' }]
-
-  const result: ProgressBadge[] = []
-  if (completedNums.length > 0) {
-    const label = completedNums.length === 1
-      ? `${completedNums[0]}차 완료`
-      : completedNums.map(n => String(n)).join('·') + '차 완료'
-    result.push({ text: label, color: 'bg-blue-100 text-blue-700' })
-  }
-  result.push(...unsubBadges)
   // 현재 진행 중인 월은 항상 "N차 진행중" 표시
   result.push({ text: `${ci}차 진행중`, color: 'bg-green-100 text-green-700' })
 
